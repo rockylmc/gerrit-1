@@ -1,4 +1,4 @@
-# these need as workaround for the 'verify: false' bug in Jcraft SSH library
+# These are needed as workaround for the 'verify: false' bug in Jcraft SSH library
 BOUNCYCASTLE = [
   '//lib/bouncycastle:bcpkix',
   '//lib/bouncycastle:bcpg',
@@ -7,6 +7,8 @@ BOUNCYCASTLE = [
 def acceptance_tests(
     srcs,
     deps = [],
+    labels = [],
+    source_under_test = [],
     vm_args = ['-Xmx256m']):
   from os import environ, path
   if not environ.get('NO_BOUNCYCASTLE'):
@@ -23,8 +25,8 @@ def acceptance_tests(
         '//gerrit-httpd:httpd',
         '//gerrit-sshd:sshd',
         '//gerrit-server:server',
-      ],
-      labels = [
+      ] + source_under_test,
+      labels = labels + [
         'acceptance',
         'slow',
       ],

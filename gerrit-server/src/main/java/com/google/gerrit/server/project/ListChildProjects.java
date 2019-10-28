@@ -16,11 +16,12 @@ package com.google.gerrit.server.project;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.gerrit.extensions.common.ProjectInfo;
 import com.google.gerrit.extensions.restapi.RestReadView;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.config.AllProjectsName;
-import com.google.gerrit.server.project.ProjectJson.ProjectInfo;
+import com.google.gerrit.server.config.AllProjectsNameProvider;
 import com.google.inject.Inject;
 
 import org.kohsuke.args4j.Option;
@@ -40,10 +41,11 @@ public class ListChildProjects implements RestReadView<ProjectResource> {
   private final ProjectNode.Factory projectNodeFactory;
 
   @Inject
-  ListChildProjects(ProjectCache projectCache, AllProjectsName allProjects,
+  ListChildProjects(ProjectCache projectCache,
+      AllProjectsNameProvider allProjectsNameProvider,
       ProjectJson json, ProjectNode.Factory projectNodeFactory) {
     this.projectCache = projectCache;
-    this.allProjects = allProjects;
+    this.allProjects = allProjectsNameProvider.get();
     this.json = json;
     this.projectNodeFactory = projectNodeFactory;
   }

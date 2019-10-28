@@ -14,7 +14,10 @@
 
 package com.google.gerrit.extensions.api.changes;
 
+import com.google.gerrit.extensions.restapi.NotImplementedException;
 import com.google.gerrit.extensions.restapi.RestApiException;
+
+import java.util.Set;
 
 public interface RevisionApi {
   void delete() throws RestApiException;
@@ -26,4 +29,64 @@ public interface RevisionApi {
   void publish() throws RestApiException;
   ChangeApi cherryPick(CherryPickInput in) throws RestApiException;
   ChangeApi rebase() throws RestApiException;
+  boolean canRebase();
+
+  void setReviewed(String path, boolean reviewed) throws RestApiException;
+  Set<String> reviewed() throws RestApiException;
+
+  /**
+   * A default implementation which allows source compatibility
+   * when adding new methods to the interface.
+   **/
+  public class NotImplemented implements RevisionApi {
+    @Override
+    public void delete() throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public void review(ReviewInput in) throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public void submit() throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public void submit(SubmitInput in) throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public void publish() throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public ChangeApi cherryPick(CherryPickInput in) throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public ChangeApi rebase() throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public boolean canRebase() {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public void setReviewed(String path, boolean reviewed) throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public Set<String> reviewed() throws RestApiException {
+      throw new NotImplementedException();
+    }
+  }
 }

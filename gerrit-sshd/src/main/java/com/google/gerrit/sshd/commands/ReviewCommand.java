@@ -25,9 +25,6 @@ import com.google.gerrit.extensions.api.changes.RestoreInput;
 import com.google.gerrit.extensions.api.changes.ReviewInput;
 import com.google.gerrit.extensions.api.changes.ReviewInput.NotifyHandling;
 import com.google.gerrit.extensions.api.changes.RevisionApi;
-import com.google.gerrit.extensions.restapi.AuthException;
-import com.google.gerrit.extensions.restapi.BadRequestException;
-import com.google.gerrit.extensions.restapi.ResourceConflictException;
 import com.google.gerrit.extensions.restapi.RestApiException;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
@@ -59,7 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-@CommandMetaData(name = "review", description = "Verify, approve and/or submit one or more patch sets")
+@CommandMetaData(name = "review", description = "Apply reviews to one or more patch sets")
 public class ReviewCommand extends SshCommand {
   private static final Logger log =
       LoggerFactory.getLogger(ReviewCommand.class);
@@ -73,7 +70,7 @@ public class ReviewCommand extends SshCommand {
     return parser;
   }
 
-  private final Set<PatchSet> patchSets = new HashSet<PatchSet>();
+  private final Set<PatchSet> patchSets = new HashSet<>();
 
   @Argument(index = 0, required = true, multiValued = true, metaVar = "{COMMIT | CHANGE,PATCHSET}", usage = "list of commits or patch sets to review")
   void addPatchSetId(final String token) {
@@ -171,7 +168,7 @@ public class ReviewCommand extends SshCommand {
     boolean ok = true;
     for (final PatchSet patchSet : patchSets) {
       try {
-        approveOne(patchSet);
+        reviewPatchSet(patchSet);
       } catch (UnloggedFailure e) {
         ok = false;
         writeError("error: " + e.getMessage() + "\n");
@@ -180,14 +177,14 @@ public class ReviewCommand extends SshCommand {
         writeError("no such change " + patchSet.getId().getParentKey().get());
       } catch (Exception e) {
         ok = false;
-        writeError("fatal: internal server error while approving "
+        writeError("fatal: internal server error while reviewing "
             + patchSet.getId() + "\n");
-        log.error("internal error while approving " + patchSet.getId(), e);
+        log.error("internal error while reviewing " + patchSet.getId(), e);
       }
     }
 
     if (!ok) {
-      throw new UnloggedFailure(1, "one or more approvals failed;"
+      throw new UnloggedFailure(1, "one or more reviews failed;"
           + " review output above");
     }
   }
@@ -200,7 +197,7 @@ public class ReviewCommand extends SshCommand {
         .review(review);
   }
 
-  private void approveOne(final PatchSet patchSet) throws Exception {
+  private void reviewPatchSet(final PatchSet patchSet) throws Exception {
 
     if (changeComment == null) {
       changeComment = "";
@@ -254,17 +251,8 @@ public class ReviewCommand extends SshCommand {
       } else if (deleteDraftPatchSet) {
         revisionApi(patchSet).delete();
       }
-    } catch (InvalidChangeOperationException e) {
-      throw error(e.getMessage());
-    } catch (IllegalStateException e) {
-      throw error(e.getMessage());
-    } catch (AuthException e) {
-      throw error(e.getMessage());
-    } catch (BadRequestException e) {
-      throw error(e.getMessage());
-    } catch (ResourceConflictException e) {
-      throw error(e.getMessage());
-    } catch (RestApiException e) {
+    } catch (IllegalStateException | InvalidChangeOperationException
+        | RestApiException e) {
       throw error(e.getMessage());
     }
   }
@@ -290,7 +278,7 @@ public class ReviewCommand extends SshCommand {
         patches = db.patchSets().byRevisionRange(id, id.max());
       }
 
-      final Set<PatchSet> matches = new HashSet<PatchSet>();
+      final Set<PatchSet> matches = new HashSet<>();
       for (final PatchSet ps : patches) {
         final Change change = db.changes().get(ps.getId().getParentKey());
         if (inProject(change) && inBranch(change)) {
@@ -356,7 +344,7 @@ public class ReviewCommand extends SshCommand {
 
   @Override
   protected void parseCommandLine() throws UnloggedFailure {
-    optionList = new ArrayList<ApproveOption>();
+    optionList = new ArrayList<>();
     customLabels = Maps.newHashMap();
 
     ProjectControl allProjectsControl;

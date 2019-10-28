@@ -136,7 +136,7 @@ class PatchScriptBuilder {
     a.resolve(null, aId);
     b.resolve(a, bId);
 
-    edits = new ArrayList<Edit>(content.getEdits());
+    edits = new ArrayList<>(content.getEdits());
 
     if (!isModify(content)) {
       intralineDifferenceIsPossible = false;
@@ -148,7 +148,7 @@ class PatchScriptBuilder {
       if (d != null) {
         switch (d.getStatus()) {
           case EDIT_LIST:
-            edits = new ArrayList<Edit>(d.getEdits());
+            edits = new ArrayList<>(d.getEdits());
             break;
 
           case DISABLED:
@@ -171,7 +171,9 @@ class PatchScriptBuilder {
       }
     }
 
-    ensureCommentsVisible(comments);
+    if (comments != null) {
+      ensureCommentsVisible(comments);
+    }
 
     boolean hugeFile = false;
     if (a.mode == FileMode.GITLINK || b.mode == FileMode.GITLINK) {
@@ -185,7 +187,7 @@ class PatchScriptBuilder {
       for (int i = 0; i < a.size(); i++) {
         a.addLine(i);
       }
-      edits = new ArrayList<Edit>(1);
+      edits = new ArrayList<>(1);
       edits.add(new Edit(a.size(), a.size()));
 
     } else {
@@ -269,7 +271,7 @@ class PatchScriptBuilder {
     // correct hunks from this, but because the Edit is empty they will not
     // style it specially.
     //
-    final List<Edit> empty = new ArrayList<Edit>();
+    final List<Edit> empty = new ArrayList<>();
     int lastLine;
 
     lastLine = -1;
@@ -450,7 +452,9 @@ class PatchScriptBuilder {
 
           id = tw != null ? tw.getObjectId(0) : ObjectId.zeroId();
           mode = tw != null ? tw.getFileMode(0) : FileMode.MISSING;
-          reuse = other != null && other.id.equals(id) && other.mode == mode;
+          reuse = other != null
+              && other.id.equals(id)
+              && (other.mode == mode || isBothFile(other.mode, mode));
 
           if (reuse) {
             srcContent = other.srcContent;
@@ -513,5 +517,10 @@ class PatchScriptBuilder {
       final RevTree tree = rw.parseTree(within);
       return TreeWalk.forPath(reader, path, tree);
     }
+  }
+
+  private static boolean isBothFile(FileMode a, FileMode b) {
+    return (a.getBits() & FileMode.TYPE_FILE) == FileMode.TYPE_FILE
+        && (b.getBits() & FileMode.TYPE_FILE) == FileMode.TYPE_FILE;
   }
 }

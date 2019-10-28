@@ -12,6 +12,7 @@ define_license(name = 'bouncycastle')
 define_license(name = 'clippy')
 define_license(name = 'codemirror')
 define_license(name = 'diffy')
+define_license(name = 'freebie_application_icon_set')
 define_license(name = 'h2')
 define_license(name = 'jgit')
 define_license(name = 'jsch')
@@ -50,51 +51,15 @@ maven_jar(
 
 maven_jar(
   name = 'guava',
-  id = 'com.google.guava:guava:16.0',
-  sha1 = 'aca09d2e5e8416bf91550e72281958e35460be52',
+  id = 'com.google.guava:guava:17.0',
+  sha1 = '9c6ef172e8de35fd8d4d8783e4821e57cdef7445',
   license = 'Apache2.0',
 )
 
 maven_jar(
-  name = 'asm3',
-  id = 'asm:asm:3.2',
-  sha1 = '9bc1511dec6adf302991ced13303e4140fdf9ab7',
-  license = 'ow2',
-  attach_source = False,
-)
-
-maven_jar(
-  name = 'ow2-asm',
-  id = 'org.ow2.asm:asm:4.1',
-  sha1 = 'ad568238ee36a820bd6c6806807e8a14ea34684d',
-  license = 'ow2',
-)
-
-maven_jar(
-  name = 'ow2-asm-analysis',
-  id = 'org.ow2.asm:asm-analysis:4.1',
-  sha1 = '73401033069e4714f57b60aeae02f97210aaa64e',
-  license = 'ow2',
-)
-
-maven_jar(
-  name = 'ow2-asm-tree',
-  id = 'org.ow2.asm:asm-tree:4.1',
-  sha1 = '51085abcc4cb6c6e1cb5551e6f999eb8e31c5b2d',
-  license = 'ow2',
-)
-
-maven_jar(
-  name = 'ow2-asm-util',
-  id = 'org.ow2.asm:asm-util:4.1',
-  sha1 = '6344065cb0f94e2b930a95e6656e040ebc11df08',
-  license = 'ow2',
-)
-
-maven_jar(
   name = 'velocity',
-  id = 'org.apache.velocity:velocity:1.6.4',
-  sha1 = 'fcc58693dd8fc83d714fba149789be37cc19b66d',
+  id = 'org.apache.velocity:velocity:1.7',
+  sha1 = '2ceb567b8f3f21118ecdec129fe1271dbc09aa7a',
   license = 'Apache2.0',
   deps = [
     '//lib/commons:collections',
@@ -106,15 +71,15 @@ maven_jar(
 
 maven_jar(
   name = 'jsch',
-  id = 'com.jcraft:jsch:0.1.50',
-  sha1 = 'fae4a0b1f2a96cb8f58f38da2650814c991cea01',
+  id = 'com.jcraft:jsch:0.1.51',
+  sha1 = '6ceee2696b07cc320d0e1aaea82c7b40768aca0f',
   license = 'jsch',
 )
 
 maven_jar(
   name = 'servlet-api-3_1',
-  id = 'org.apache.tomcat:tomcat-servlet-api:8.0.0-RC10',
-  sha1 = '975935b6203073938dfeeb28e4effc3b094c4fc4',
+  id = 'org.apache.tomcat:tomcat-servlet-api:8.0.5',
+  sha1 = '9ef01afc25481b82aa8f3615db536869f2dc961e',
   license = 'Apache2.0',
   exclude = ['META-INF/NOTICE', 'META-INF/LICENSE'],
 )
@@ -172,9 +137,9 @@ maven_jar(
   license = 'Apache2.0',
   deps = [
     ':parboiled-core',
-    ':ow2-asm-tree',
-    ':ow2-asm-analysis',
-    ':ow2-asm-util',
+    '//lib/ow2:ow2-asm-tree',
+    '//lib/ow2:ow2-asm-analysis',
+    '//lib/ow2:ow2-asm-util',
   ],
   attach_source = False,
   visibility = [],
@@ -221,35 +186,6 @@ maven_jar(
 )
 
 maven_jar(
-  name = 'easymock',
-  id = 'org.easymock:easymock:3.2',
-  sha1 = '00c82f7fa3ef377d8954b1db25123944b5af2ba4',
-  license = 'DO_NOT_DISTRIBUTE',
-  deps = [
-    ':cglib-2_2',
-    ':objenesis',
-  ],
-)
-
-maven_jar(
-  name = 'cglib-2_2',
-  id = 'cglib:cglib-nodep:2.2.2',
-  sha1 = '00d456bb230c70c0b95c76fb28e429d42f275941',
-  license = 'DO_NOT_DISTRIBUTE',
-  visibility = ['//lib:easymock'],
-  attach_source = False,
-)
-
-maven_jar(
-  name = 'objenesis',
-  id = 'org.objenesis:objenesis:1.2',
-  sha1 = 'bfcb0539a071a4c5a30690388903ac48c0667f2a',
-  license = 'DO_NOT_DISTRIBUTE',
-  visibility = ['//lib:easymock'],
-  attach_source = False,
-)
-
-maven_jar(
   name = 'tukaani-xz',
   id = 'org.tukaani:xz:1.4',
   sha1 = '18a9a2ce6abf32ea1b5fd31dae5210ad93f4e5e3',
@@ -257,3 +193,12 @@ maven_jar(
   attach_source = False,
   visibility = ['//lib/jgit:jgit-archive'],
 )
+
+maven_jar(
+  name = 'javassist-3.17.1-GA',
+  # The GWT version is still at 3.16.1-GA, so those do not match
+  id = 'org.javassist:javassist:3.17.1-GA',
+  sha1 = '30c30512115866b6e0123f1913bc7735b9f76d08',
+  license = 'DO_NOT_DISTRIBUTE',
+)
+

@@ -22,8 +22,6 @@ import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.AccountGroup;
 import com.google.gerrit.reviewdb.client.Branch;
 import com.google.gerrit.reviewdb.client.Change;
-import com.google.gerrit.reviewdb.client.Project;
-import com.google.gerrit.reviewdb.client.RevId;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
@@ -36,6 +34,7 @@ import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.config.TrackingFooters;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.strategy.SubmitStrategyFactory;
+import com.google.gerrit.server.index.ChangeField;
 import com.google.gerrit.server.index.ChangeIndex;
 import com.google.gerrit.server.index.IndexCollection;
 import com.google.gerrit.server.index.Schema;
@@ -55,7 +54,6 @@ import com.google.inject.assistedinject.Assisted;
 import org.eclipse.jgit.lib.AbbreviatedObjectId;
 import org.eclipse.jgit.lib.Config;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -74,17 +72,10 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
   private static final Pattern DEF_CHANGE =
       Pattern.compile("^([1-9][0-9]*|[iI][0-9a-f]{4,}.*)$");
 
-  private static final Pattern PAT_COMMIT =
-      Pattern.compile("^([0-9a-fA-F]{4," + RevId.LEN + "})$");
-  private static final Pattern PAT_EMAIL =
-      Pattern.compile("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+");
-
-  private static final Pattern PAT_LABEL =
-      Pattern.compile("^[a-zA-Z][a-zA-Z0-9]*((=|>=|<=)[+-]?|[+-])\\d+$");
-
   // NOTE: As new search operations are added, please keep the
   // SearchSuggestOracle up to date.
 
+  public static final String FIELD_ADDED = "added";
   public static final String FIELD_AFTER = "after";
   public static final String FIELD_AGE = "age";
   public static final String FIELD_BEFORE = "before";
@@ -93,6 +84,8 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
   public static final String FIELD_COMMENT = "comment";
   public static final String FIELD_COMMIT = "commit";
   public static final String FIELD_CONFLICTS = "conflicts";
+  public static final String FIELD_DELETED = "deleted";
+  public static final String FIELD_DELTA = "delta";
   public static final String FIELD_DRAFTBY = "draftby";
   public static final String FIELD_FILE = "file";
   public static final String FIELD_IS = "is";
@@ -106,6 +99,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
   public static final String FIELD_PARENTPROJECT = "parentproject";
   public static final String FIELD_PATH = "path";
   public static final String FIELD_PROJECT = "project";
+  public static final String FIELD_PROJECTS = "projects";
   public static final String FIELD_REF = "ref";
   public static final String FIELD_REVIEWER = "reviewer";
   public static final String FIELD_REVIEWERIN = "reviewerin";
@@ -278,7 +272,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
 
   @Operator
   public Predicate<ChangeData> status(String statusName) {
-    if ("open".equals(statusName)) {
+    if ("open".equals(statusName) || "pending".equals(statusName)) {
       return status_open();
 
     } else if ("closed".equals(statusName)) {
@@ -372,6 +366,14 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
   }
 
   @Operator
+  public Predicate<ChangeData> projects(String name) throws QueryParseException {
+    if (!schema(args.indexes).hasField(ChangeField.PROJECTS)) {
+      throw new QueryParseException("Unsupported operator: " + FIELD_PROJECTS);
+    }
+    return new ProjectPrefixPredicate(name);
+  }
+
+  @Operator
   public Predicate<ChangeData> parentproject(String name) {
     return new ParentProjectPredicate(args.db, args.projectCache,
         args.listChildProjects, args.self, name);
@@ -393,8 +395,8 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
   @Operator
   public Predicate<ChangeData> topic(String name) {
     if (name.startsWith("^"))
-      return new RegexTopicPredicate(name);
-    return new TopicPredicate(name);
+      return new RegexTopicPredicate(schema(args.indexes), name);
+    return new TopicPredicate(schema(args.indexes), name);
   }
 
   @Operator
@@ -549,7 +551,7 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
     //
     Collection<GroupReference> suggestions = args.groupBackend.suggest(who, null);
     if (!suggestions.isEmpty()) {
-      HashSet<AccountGroup.UUID> ids = new HashSet<AccountGroup.UUID>();
+      HashSet<AccountGroup.UUID> ids = new HashSet<>();
       for (GroupReference ref : suggestions) {
         ids.add(ref.getUUID());
       }
@@ -677,53 +679,83 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
     return sortkey_before(sortKey);
   }
 
-  @Override
-  protected Predicate<ChangeData> defaultField(String query)
+  @Operator
+  public Predicate<ChangeData> added(String value)
       throws QueryParseException {
+    return new AddedPredicate(value);
+  }
+
+  @Operator
+  public Predicate<ChangeData> deleted(String value)
+      throws QueryParseException {
+    return new DeletedPredicate(value);
+  }
+
+  @Operator
+  public Predicate<ChangeData> size(String value)
+      throws QueryParseException {
+    return delta(value);
+  }
+
+  @Operator
+  public Predicate<ChangeData> delta(String value)
+      throws QueryParseException {
+    return new DeltaPredicate(value);
+  }
+
+  @Override
+  protected Predicate<ChangeData> defaultField(String query) {
     if (query.startsWith("refs/")) {
       return ref(query);
-
     } else if (DEF_CHANGE.matcher(query).matches()) {
       return change(query);
-
-    } else if (PAT_COMMIT.matcher(query).matches()) {
-      return commit(query);
-
-    } else if (PAT_EMAIL.matcher(query).find()) {
-      try {
-        return Predicate.or(owner(query), reviewer(query));
-      } catch (OrmException err) {
-        throw error("Cannot lookup user", err);
-      }
-
-    } else if (PAT_LABEL.matcher(query).find()) {
-      try {
-        return label(query);
-      } catch (OrmException err) {
-        throw error("Cannot lookup user", err);
-      }
-
-    } else {
-      // Try to match a project name by substring query.
-      final List<ProjectPredicate> predicate =
-          new ArrayList<ProjectPredicate>();
-      for (Project.NameKey name : args.projectCache.all()) {
-        if (name.get().toLowerCase().contains(query.toLowerCase())) {
-          predicate.add(new ProjectPredicate(name.get()));
-        }
-      }
-
-      // If two or more projects contains "query" as substring create an
-      // OrPredicate holding predicates for all these projects, otherwise if
-      // only one contains that, return only that one predicate by itself.
-      if (predicate.size() == 1) {
-        return predicate.get(0);
-      } else if (predicate.size() > 1) {
-        return Predicate.or(predicate);
-      }
-
-      throw error("Unsupported query:" + query);
     }
+
+    List<Predicate<ChangeData>> predicates = Lists.newArrayListWithCapacity(9);
+    try {
+      predicates.add(commit(query));
+    } catch (IllegalArgumentException e) {
+      // Skip.
+    }
+    try {
+      predicates.add(owner(query));
+    } catch (OrmException | QueryParseException e) {
+      // Skip.
+    }
+    try {
+      predicates.add(reviewer(query));
+    } catch (OrmException | QueryParseException e) {
+      // Skip.
+    }
+    try {
+      predicates.add(file(query));
+    } catch (QueryParseException e) {
+      // Skip.
+    }
+    try {
+      predicates.add(label(query));
+    } catch (OrmException | QueryParseException e) {
+      // Skip.
+    }
+    try {
+      predicates.add(message(query));
+    } catch (QueryParseException e) {
+      // Skip.
+    }
+    try {
+      predicates.add(comment(query));
+    } catch (QueryParseException e) {
+      // Skip.
+    }
+    try {
+      predicates.add(projects(query));
+    } catch (QueryParseException e) {
+      // Skip.
+    }
+    predicates.add(ref(query));
+    predicates.add(branch(query));
+    predicates.add(topic(query));
+    return Predicate.or(predicates);
   }
 
   private Set<Account.Id> parseAccount(String who)

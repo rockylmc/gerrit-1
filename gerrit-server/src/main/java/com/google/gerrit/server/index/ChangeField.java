@@ -14,6 +14,7 @@
 
 package com.google.gerrit.server.index;
 
+import com.google.common.base.Objects;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -28,6 +29,7 @@ import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gerrit.server.query.change.ChangeData;
 import com.google.gerrit.server.query.change.ChangeQueryBuilder;
 import com.google.gerrit.server.query.change.ChangeStatusPredicate;
+import com.google.gerrit.server.query.change.ChangeData.ChangedLines;
 import com.google.gwtorm.protobuf.CodecFactory;
 import com.google.gwtorm.protobuf.ProtobufCodec;
 import com.google.gwtorm.server.OrmException;
@@ -93,6 +95,17 @@ public class ChangeField {
         }
       };
 
+  /** Project containing the change, as a prefix field. */
+  public static final FieldDef<ChangeData, String> PROJECTS =
+      new FieldDef.Single<ChangeData, String>(
+          ChangeQueryBuilder.FIELD_PROJECTS, FieldType.PREFIX, false) {
+        @Override
+        public String get(ChangeData input, FillArgs args)
+            throws OrmException {
+          return input.change().getProject().get();
+        }
+      };
+
   /** Reference (aka branch) the change will submit onto. */
   public static final FieldDef<ChangeData, String> REF =
       new FieldDef.Single<ChangeData, String>(
@@ -104,14 +117,26 @@ public class ChangeField {
         }
       };
 
+  @Deprecated
   /** Topic, a short annotation on the branch. */
-  public static final FieldDef<ChangeData, String> TOPIC =
+  public static final FieldDef<ChangeData, String> LEGACY_TOPIC =
       new FieldDef.Single<ChangeData, String>(
           ChangeQueryBuilder.FIELD_TOPIC, FieldType.EXACT, false) {
         @Override
         public String get(ChangeData input, FillArgs args)
             throws OrmException {
           return input.change().getTopic();
+        }
+      };
+
+  /** Topic, a short annotation on the branch. */
+  public static final FieldDef<ChangeData, String> TOPIC =
+      new FieldDef.Single<ChangeData, String>(
+          "topic2", FieldType.EXACT, false) {
+        @Override
+        public String get(ChangeData input, FillArgs args)
+            throws OrmException {
+          return Objects.firstNonNull(input.change().getTopic(), "");
         }
       };
 
@@ -401,6 +426,47 @@ public class ChangeField {
         public String get(ChangeData input, FillArgs args)
             throws OrmException {
           return input.change().isMergeable() ? "1" : null;
+        }
+      };
+
+  /** The number of inserted lines in this change. */
+  public static final FieldDef<ChangeData, Integer> ADDED =
+      new FieldDef.Single<ChangeData, Integer>(
+          ChangeQueryBuilder.FIELD_ADDED, FieldType.INTEGER_RANGE, true) {
+        @Override
+        public Integer get(ChangeData input, FillArgs args)
+            throws OrmException {
+
+          return input.changedLines() != null
+              ? input.changedLines().insertions
+              : null;
+        }
+      };
+
+  /** The number of deleted lines in this change. */
+  public static final FieldDef<ChangeData, Integer> DELETED =
+      new FieldDef.Single<ChangeData, Integer>(
+          ChangeQueryBuilder.FIELD_DELETED, FieldType.INTEGER_RANGE, true) {
+        @Override
+        public Integer get(ChangeData input, FillArgs args)
+            throws OrmException {
+          return input.changedLines() != null
+              ? input.changedLines().deletions
+              : null;
+        }
+      };
+
+  /** The total number of modified lines in this change. */
+  public static final FieldDef<ChangeData, Integer> DELTA =
+      new FieldDef.Single<ChangeData, Integer>(
+          ChangeQueryBuilder.FIELD_DELTA, FieldType.INTEGER_RANGE, false) {
+        @Override
+        public Integer get(ChangeData input, FillArgs args)
+            throws OrmException {
+          ChangedLines changedLines = input.changedLines();
+          return changedLines != null
+              ? changedLines.insertions + changedLines.deletions
+              : null;
         }
       };
 

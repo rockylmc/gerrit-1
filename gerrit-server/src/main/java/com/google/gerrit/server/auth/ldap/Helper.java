@@ -58,7 +58,7 @@ import javax.security.auth.login.LoginException;
 @Singleton class Helper {
   static final String LDAP_UUID = "ldap:";
 
-  private final Cache<String, ImmutableSet<String>> groupsByInclude;
+  private final Cache<String, ImmutableSet<String>> parentGroups;
   private final Config config;
   private final String server;
   private final String username;
@@ -67,28 +67,41 @@ import javax.security.auth.login.LoginException;
   private final boolean sslVerify;
   private final String authentication;
   private volatile LdapSchema ldapSchema;
-  private final String readTimeOutMillis;
+  private final String readTimeoutMillis;
+  private final String connectTimeoutMillis;
+  private final boolean useConnectionPooling;
 
   @Inject
   Helper(@GerritServerConfig final Config config,
-      @Named(LdapModule.GROUPS_BYINCLUDE_CACHE)
-      Cache<String, ImmutableSet<String>> groupsByInclude) {
+      @Named(LdapModule.PARENT_GROUPS_CACHE)
+      Cache<String, ImmutableSet<String>> parentGroups) {
     this.config = config;
     this.server = LdapRealm.optional(config, "server");
     this.username = LdapRealm.optional(config, "username");
-    this.password = LdapRealm.optional(config, "password");
-    this.referral = LdapRealm.optional(config, "referral");
+    this.password = LdapRealm.optional(config, "password", "");
+    this.referral = LdapRealm.optional(config, "referral", "ignore");
     this.sslVerify = config.getBoolean("ldap", "sslverify", true);
-    this.authentication = LdapRealm.optional(config, "authentication");
-    String timeout = LdapRealm.optional(config, "readTimeout");
-    if (timeout != null) {
-      readTimeOutMillis =
-          Long.toString(ConfigUtil.getTimeUnit(timeout, 0,
+    this.authentication =
+        LdapRealm.optional(config, "authentication", "simple");
+    String readTimeout = LdapRealm.optional(config, "readTimeout");
+    if (readTimeout != null) {
+      readTimeoutMillis =
+          Long.toString(ConfigUtil.getTimeUnit(readTimeout, 0,
               TimeUnit.MILLISECONDS));
     } else {
-      readTimeOutMillis = null;
+      readTimeoutMillis = null;
     }
-    this.groupsByInclude = groupsByInclude;
+    String connectTimeout = LdapRealm.optional(config, "connectTimeout");
+    if (connectTimeout != null) {
+      connectTimeoutMillis =
+          Long.toString(ConfigUtil.getTimeUnit(connectTimeout, 0,
+              TimeUnit.MILLISECONDS));
+    } else {
+      connectTimeoutMillis = null;
+    }
+    this.parentGroups = parentGroups;
+    this.useConnectionPooling =
+        LdapRealm.optional(config, "useConnectionPooling", false);
   }
 
   private Properties createContextProperties() {
@@ -99,22 +112,28 @@ import javax.security.auth.login.LoginException;
       Class<? extends SSLSocketFactory> factory = BlindSSLSocketFactory.class;
       env.put("java.naming.ldap.factory.socket", factory.getName());
     }
-    if (readTimeOutMillis != null) {
-      env.put("com.sun.jndi.ldap.read.timeout", readTimeOutMillis);
+    if (readTimeoutMillis != null) {
+      env.put("com.sun.jndi.ldap.read.timeout", readTimeoutMillis);
+    }
+    if (connectTimeoutMillis != null) {
+      env.put("com.sun.jndi.ldap.connect.timeout", connectTimeoutMillis);
+    }
+    if (useConnectionPooling) {
+      env.put("com.sun.jndi.ldap.connect.pool", "true");
     }
     return env;
   }
 
   DirContext open() throws NamingException, LoginException {
     final Properties env = createContextProperties();
-    env.put(Context.SECURITY_AUTHENTICATION, authentication != null ? authentication : "simple");
-    env.put(Context.REFERRAL, referral != null ? referral : "ignore");
+    env.put(Context.SECURITY_AUTHENTICATION, authentication);
+    env.put(Context.REFERRAL, referral);
     if ("GSSAPI".equals(authentication)) {
       return kerberosOpen(env);
     } else {
       if (username != null) {
         env.put(Context.SECURITY_PRINCIPAL, username);
-        env.put(Context.SECURITY_CREDENTIALS, password != null ? password : "");
+        env.put(Context.SECURITY_CREDENTIALS, password);
       }
       return new InitialDirContext(env);
     }
@@ -146,8 +165,8 @@ import javax.security.auth.login.LoginException;
     final Properties env = createContextProperties();
     env.put(Context.SECURITY_AUTHENTICATION, "simple");
     env.put(Context.SECURITY_PRINCIPAL, dn);
-    env.put(Context.SECURITY_CREDENTIALS, password != null ? password : "");
-    env.put(Context.REFERRAL, referral != null ? referral : "ignore");
+    env.put(Context.SECURITY_CREDENTIALS, password);
+    env.put(Context.REFERRAL, referral);
     try {
       return new InitialDirContext(env);
     } catch (NamingException e) {
@@ -166,41 +185,42 @@ import javax.security.auth.login.LoginException;
     return ldapSchema;
   }
 
-  LdapQuery.Result findAccount(final Helper.LdapSchema schema,
-      final DirContext ctx, final String username) throws NamingException,
-      AccountException {
-    final HashMap<String, String> params = new HashMap<String, String>();
+  LdapQuery.Result findAccount(Helper.LdapSchema schema,
+      DirContext ctx, String username, boolean fetchMemberOf)
+      throws NamingException, AccountException {
+    final HashMap<String, String> params = new HashMap<>();
     params.put(LdapRealm.USERNAME, username);
 
-    final List<LdapQuery.Result> res = new ArrayList<LdapQuery.Result>();
-    for (LdapQuery accountQuery : schema.accountQueryList) {
-      res.addAll(accountQuery.query(ctx, params));
+    List<LdapQuery> accountQueryList;
+    if (fetchMemberOf && schema.type.accountMemberField() != null) {
+      accountQueryList = schema.accountWithMemberOfQueryList;
+    } else {
+      accountQueryList = schema.accountQueryList;
     }
 
-    switch (res.size()) {
-      case 0:
-        throw new NoSuchUserException(username);
-
-      case 1:
+    for (LdapQuery accountQuery : accountQueryList) {
+      List<LdapQuery.Result> res = accountQuery.query(ctx, params);
+      if (res.size() == 1) {
         return res.get(0);
-
-      default:
+      } else if (res.size() > 1) {
         throw new AccountException("Duplicate users: " + username);
+      }
     }
+    throw new NoSuchUserException(username);
   }
 
   Set<AccountGroup.UUID> queryForGroups(final DirContext ctx,
       final String username, LdapQuery.Result account)
       throws NamingException, AccountException {
     final LdapSchema schema = getSchema(ctx);
-    final Set<String> groupDNs = new HashSet<String>();
+    final Set<String> groupDNs = new HashSet<>();
 
     if (!schema.groupMemberQueryList.isEmpty()) {
-      final HashMap<String, String> params = new HashMap<String, String>();
+      final HashMap<String, String> params = new HashMap<>();
 
       if (account == null) {
         try {
-          account = findAccount(schema, ctx, username);
+          account = findAccount(schema, ctx, username, false);
         } catch (AccountException e) {
           LdapRealm.log.warn("Account " + username +
               " not found, assuming empty group membership");
@@ -221,9 +241,9 @@ import javax.security.auth.login.LoginException;
     }
 
     if (schema.accountMemberField != null) {
-      if (account == null) {
+      if (account == null || account.getAll(schema.accountMemberField) == null) {
         try {
-          account = findAccount(schema, ctx, username);
+          account = findAccount(schema, ctx, username, true);
         } catch (AccountException e) {
           LdapRealm.log.warn("Account " + username +
               " not found, assuming empty group membership");
@@ -244,7 +264,7 @@ import javax.security.auth.login.LoginException;
       }
     }
 
-    final Set<AccountGroup.UUID> actual = new HashSet<AccountGroup.UUID>();
+    final Set<AccountGroup.UUID> actual = new HashSet<>();
     for (String dn : groupDNs) {
       actual.add(new AccountGroup.UUID(LDAP_UUID + dn));
     }
@@ -259,14 +279,15 @@ import javax.security.auth.login.LoginException;
   private void recursivelyExpandGroups(final Set<String> groupDNs,
       final LdapSchema schema, final DirContext ctx, final String groupDN) {
     if (groupDNs.add(groupDN) && schema.accountMemberField != null) {
-      ImmutableSet<String> cachedGroupDNs = groupsByInclude.getIfPresent(groupDN);
-      if (cachedGroupDNs == null) {
+      ImmutableSet<String> cachedParentsDNs = parentGroups.getIfPresent(groupDN);
+      if (cachedParentsDNs == null) {
         // Recursively identify the groups it is a member of.
         ImmutableSet.Builder<String> dns = ImmutableSet.builder();
         try {
           final Name compositeGroupName = new CompositeName().add(groupDN);
           final Attribute in =
-              ctx.getAttributes(compositeGroupName).get(schema.accountMemberField);
+              ctx.getAttributes(compositeGroupName, schema.accountMemberFieldArray)
+                .get(schema.accountMemberField);
           if (in != null) {
             final NamingEnumeration<?> groups = in.getAll();
             try {
@@ -279,10 +300,10 @@ import javax.security.auth.login.LoginException;
         } catch (NamingException e) {
           LdapRealm.log.warn("Could not find group " + groupDN, e);
         }
-        cachedGroupDNs = dns.build();
-        groupsByInclude.put(groupDN, cachedGroupDNs);
+        cachedParentsDNs = dns.build();
+        parentGroups.put(groupDN, cachedParentsDNs);
       }
-      for (String dn : cachedGroupDNs) {
+      for (String dn : cachedParentsDNs) {
         recursivelyExpandGroups(groupDNs, schema, ctx, dn);
       }
     }
@@ -295,7 +316,9 @@ import javax.security.auth.login.LoginException;
     final ParameterizedString accountEmailAddress;
     final ParameterizedString accountSshUserName;
     final String accountMemberField;
+    final String[] accountMemberFieldArray;
     final List<LdapQuery> accountQueryList;
+    final List<LdapQuery> accountWithMemberOfQueryList;
 
     final List<String> groupBases;
     final SearchScope groupScope;
@@ -305,10 +328,11 @@ import javax.security.auth.login.LoginException;
 
     LdapSchema(final DirContext ctx) {
       type = discoverLdapType(ctx);
-      groupMemberQueryList = new ArrayList<LdapQuery>();
-      accountQueryList = new ArrayList<LdapQuery>();
+      groupMemberQueryList = new ArrayList<>();
+      accountQueryList = new ArrayList<>();
+      accountWithMemberOfQueryList = new ArrayList<>();
 
-      final Set<String> accountAtts = new HashSet<String>();
+      final Set<String> accountAtts = new HashSet<>();
 
       // Group query
       //
@@ -359,15 +383,24 @@ import javax.security.auth.login.LoginException;
       accountMemberField =
           LdapRealm.optdef(config, "accountMemberField", type.accountMemberField());
       if (accountMemberField != null) {
-        accountAtts.add(accountMemberField);
+        accountMemberFieldArray = new String[] {accountMemberField};
+      } else {
+        accountMemberFieldArray = null;
       }
 
       final SearchScope accountScope = LdapRealm.scope(config, "accountScope");
       final String accountPattern =
           LdapRealm.reqdef(config, "accountPattern", type.accountPattern());
 
+      Set<String> accountWithMemberOfAtts;
+      if (accountMemberField != null) {
+        accountWithMemberOfAtts = new HashSet<>(accountAtts);
+        accountWithMemberOfAtts.add(accountMemberField);
+      } else {
+        accountWithMemberOfAtts = null;
+      }
       for (String accountBase : LdapRealm.requiredList(config, "accountBase")) {
-        final LdapQuery accountQuery =
+        LdapQuery accountQuery =
             new LdapQuery(accountBase, accountScope, new ParameterizedString(
                 accountPattern), accountAtts);
         if (accountQuery.getParameters().isEmpty()) {
@@ -375,6 +408,13 @@ import javax.security.auth.login.LoginException;
               "No variables in ldap.accountPattern");
         }
         accountQueryList.add(accountQuery);
+
+        if (accountWithMemberOfAtts != null) {
+          LdapQuery accountWithMemberOfQuery =
+              new LdapQuery(accountBase, accountScope, new ParameterizedString(
+                  accountPattern), accountWithMemberOfAtts);
+          accountWithMemberOfQueryList.add(accountWithMemberOfQuery);
+        }
       }
     }
 

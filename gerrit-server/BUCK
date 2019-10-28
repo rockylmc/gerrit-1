@@ -8,14 +8,14 @@ SRCS = glob(
 )
 RESOURCES =  glob(['src/main/resources/**/*'])
 
-java_library2(
+java_library(
   name = 'constants',
   srcs = CONSTANTS_SRC,
   visibility = ['PUBLIC'],
 )
 
 # TODO(sop) break up gerrit-server java_library(), its too big
-java_library2(
+java_library(
   name = 'server',
   srcs = SRCS,
   resources = RESOURCES,
@@ -41,9 +41,9 @@ java_library2(
     '//lib:jsch',
     '//lib:juniversalchardet',
     '//lib:mime-util',
-    '//lib:ow2-asm',
-    '//lib:ow2-asm-tree',
-    '//lib:ow2-asm-util',
+    '//lib/ow2:ow2-asm',
+    '//lib/ow2:ow2-asm-tree',
+    '//lib/ow2:ow2-asm-util',
     '//lib:parboiled-core',
     '//lib:pegdown',
     '//lib:protobuf',
@@ -61,12 +61,14 @@ java_library2(
     '//lib/jgit:jgit-archive',
     '//lib/joda:joda-time',
     '//lib/log:api',
+    '//lib/log:log4j',
     '//lib/prolog:prolog-cafe',
     '//lib/lucene:analyzers-common',
     '//lib/lucene:core',
     '//lib/lucene:query-parser',
   ],
-  compile_deps = [
+  provided_deps = [
+    '//lib:servlet-api-3_1',
     '//lib/bouncycastle:bcprov',
     '//lib/bouncycastle:bcpg',
     '//lib/bouncycastle:bcpkix',
@@ -101,6 +103,16 @@ java_library(
     '//lib/guice:guice-servlet',
     '//lib/jgit:jgit',
     '//lib/jgit:junit',
+    '//lib/log:impl_log4j',
+    '//lib/log:log4j',
+  ],
+  exported_deps = [
+    '//lib/easymock:easymock',
+    '//lib/powermock:powermock-api-easymock',
+    '//lib/powermock:powermock-api-support',
+    '//lib/powermock:powermock-core',
+    '//lib/powermock:powermock-module-junit4',
+    '//lib/powermock:powermock-module-junit4-common',
   ],
   visibility = ['PUBLIC'],
 )
@@ -188,15 +200,16 @@ java_test(
     '//gerrit-reviewdb:server',
     '//gerrit-server/src/main/prolog:common',
     '//lib:args4j',
-    '//lib:easymock',
     '//lib:guava',
     '//lib:gwtorm',
     '//lib:junit',
     '//lib/guice:guice',
+    '//lib/guice:guice-assistedinject',
     '//lib/jgit:jgit',
     '//lib/jgit:junit',
     '//lib/joda:joda-time',
     '//lib/prolog:prolog-cafe',
   ],
   source_under_test = [':server'],
+  visibility = ['//tools/eclipse:classpath'],
 )

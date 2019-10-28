@@ -303,6 +303,12 @@ public class MergeabilityChecker implements GitReferenceUpdatedListener {
     }
 
     @Override
+    public String toString() {
+      return "mergeability-check-change-" + change.getId().get() + "-project-"
+          + change.getDest().getParentKey();
+    }
+
+    @Override
     public Boolean call() throws Exception {
       mergeabilityCheckQueue.updatingMergeabilityFlag(change, force);
 
@@ -342,7 +348,7 @@ public class MergeabilityChecker implements GitReferenceUpdatedListener {
         m.setForce(force);
 
         ChangeControl control =
-            changeControlFactory.controlFor(change.getId(), context.getCurrentUser());
+            changeControlFactory.controlFor(change, context.getCurrentUser());
         MergeableInfo info = m.apply(
             new RevisionResource(new ChangeResource(control), ps));
         return change.isMergeable() != info.mergeable;

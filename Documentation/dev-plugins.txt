@@ -36,7 +36,7 @@ plugin project.
 ----
 mvn archetype:generate -DarchetypeGroupId=com.google.gerrit \
     -DarchetypeArtifactId=gerrit-plugin-archetype \
-    -DarchetypeVersion=2.9 \
+    -DarchetypeVersion=2.10.7 \
     -DgroupId=com.googlesource.gerrit.plugins.testplugin \
     -DartifactId=testplugin
 ----
@@ -400,6 +400,10 @@ Project deletion
 +
 Update of HEAD on a project
 
+* `com.google.gerrit.extensions.events.UsageDataPublishedListener`:
++
+Publication of usage data
+
 [[stream-events]]
 == Sending Events to the Events Stream
 
@@ -430,6 +434,14 @@ set additional properties on it.
 Plugins may register PostReceiveHook instances in order to get
 notified when JGit successfully receives a pack. This may be useful
 for those plugins which would like to monitor changes in Git
+repositories.
+
+[[pre-upload-hook]]
+== Pre Upload-Pack Hooks
+
+Plugins may register PreUploadHook instances in order to get
+notified when JGit is about to upload a pack. This may be useful
+for those plugins which would like to monitor usage in Git
 repositories.
 
 [[ssh]]
@@ -1706,6 +1718,42 @@ commands by implementing
 
 The download schemes and download commands which are used most often
 are provided by the Gerrit core plugin `download-commands`.
+
+[[links-to-external-tools]]
+== Links To External Tools
+
+Gerrit has extension points that enables development of a
+light-weight plugin that links commits to external
+tools (GitBlit, CGit, company specific resources etc).
+
+PatchSetWebLinks will appear to the right of the commit-SHA1 in the UI.
+
+[source, java]
+----
+import com.google.gerrit.extensions.annotations.Listen;
+import com.google.gerrit.extensions.webui.PatchSetWebLink;;
+
+@Listen
+public class MyWeblinkPlugin implements PatchSetWebLink {
+
+  private String name = "MyLink";
+  private String placeHolderUrlProjectCommit = "http://my.tool.com/project=%s/commit=%s";
+
+  @Override
+  public String getLinkName() {
+    return name ;
+  }
+
+  @Override
+  public String getPatchSetUrl(String project, String commit) {
+    return String.format(placeHolderUrlProjectCommit, project, commit);
+  }
+
+}
+----
+
+ProjectWebLinks will appear in the project list in the
+`Repository Browser` column.
 
 [[documentation]]
 == Documentation

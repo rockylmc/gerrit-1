@@ -18,6 +18,7 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.inject.Scopes.SINGLETON;
 
 import com.google.common.net.InetAddresses;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.gerrit.common.ChangeHooks;
 import com.google.gerrit.common.DisabledChangeHooks;
 import com.google.gerrit.reviewdb.client.AuthType;
@@ -29,6 +30,8 @@ import com.google.gerrit.server.cache.h2.DefaultCacheFactory;
 import com.google.gerrit.server.change.MergeabilityChecksExecutorModule;
 import com.google.gerrit.server.config.AllProjectsName;
 import com.google.gerrit.server.config.AllProjectsNameProvider;
+import com.google.gerrit.server.config.AllUsersName;
+import com.google.gerrit.server.config.AllUsersNameProvider;
 import com.google.gerrit.server.config.AnonymousCowardName;
 import com.google.gerrit.server.config.AnonymousCowardNameProvider;
 import com.google.gerrit.server.config.CanonicalWebUrlModule;
@@ -47,6 +50,7 @@ import com.google.gerrit.server.index.ChangeSchemas;
 import com.google.gerrit.server.index.IndexModule.IndexType;
 import com.google.gerrit.server.mail.SignedTokenEmailTokenVerifier;
 import com.google.gerrit.server.mail.SmtpEmailSender;
+import com.google.gerrit.server.patch.DiffExecutor;
 import com.google.gerrit.server.schema.Current;
 import com.google.gerrit.server.schema.DataSourceType;
 import com.google.gerrit.server.schema.SchemaCreator;
@@ -73,6 +77,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.concurrent.ExecutorService;
 
 public class InMemoryModule extends FactoryModule {
   public static Config newDefaultConfig() {
@@ -134,6 +139,8 @@ public class InMemoryModule extends FactoryModule {
       .toProvider(AnonymousCowardNameProvider.class);
     bind(AllProjectsName.class)
         .toProvider(AllProjectsNameProvider.class);
+    bind(AllUsersName.class)
+        .toProvider(AllUsersNameProvider.class);
     bind(GitRepositoryManager.class)
         .to(InMemoryRepositoryManager.class);
     bind(InMemoryRepositoryManager.class).in(SINGLETON);
@@ -151,6 +158,18 @@ public class InMemoryModule extends FactoryModule {
       @Override
       protected Class<? extends Provider<String>> provider() {
         return CanonicalWebUrlProvider.class;
+      }
+    });
+    //Replacement of DiffExecutorModule to not use thread pool in the tests
+    install(new AbstractModule() {
+      @Override
+      protected void configure() {
+      }
+      @Provides
+      @Singleton
+      @DiffExecutor
+      public ExecutorService createDiffExecutor() {
+        return MoreExecutors.sameThreadExecutor();
       }
     });
     install(new DefaultCacheFactory.Module());

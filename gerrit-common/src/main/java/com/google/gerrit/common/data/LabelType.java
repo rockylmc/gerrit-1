@@ -60,20 +60,6 @@ public class LabelType {
     return name;
   }
 
-  public static String defaultAbbreviation(String name) {
-    StringBuilder abbr = new StringBuilder();
-    for (int i = 0; i < name.length(); i++) {
-      char c = name.charAt(i);
-      if (c >= 'A' && c <= 'Z') {
-        abbr.append(c);
-      }
-    }
-    if (abbr.length() == 0) {
-      abbr.append(Character.toUpperCase(name.charAt(0)));
-    }
-    return abbr.toString();
-  }
-
   private static List<LabelValue> sortValues(List<LabelValue> values) {
     values = new ArrayList<>(values);
     if (values.size() <= 1) {
@@ -102,12 +88,12 @@ public class LabelType {
 
   protected String name;
 
-  protected String abbreviation;
   protected String functionName;
   protected boolean copyMinScore;
   protected boolean copyMaxScore;
   protected boolean copyAllScoresOnTrivialRebase;
   protected boolean copyAllScoresIfNoCodeChange;
+  protected short defaultValue;
 
   protected List<LabelValue> values;
   protected short maxNegative;
@@ -125,8 +111,8 @@ public class LabelType {
     this.name = checkName(name);
     canOverride = true;
     values = sortValues(valueList);
+    defaultValue = 0;
 
-    abbreviation = defaultAbbreviation(name);
     functionName = "MaxWithBlock";
 
     maxNegative = Short.MIN_VALUE;
@@ -147,14 +133,6 @@ public class LabelType {
 
   public boolean matches(PatchSetApproval psa) {
     return psa.getLabelId().get().equalsIgnoreCase(name);
-  }
-
-  public String getAbbreviation() {
-    return abbreviation;
-  }
-
-  public void setAbbreviation(String abbreviation) {
-    this.abbreviation = abbreviation;
   }
 
   public String getFunctionName() {
@@ -198,6 +176,14 @@ public class LabelType {
     }
     final LabelValue v = values.get(values.size() - 1);
     return v.getValue() > 0 ? v : null;
+  }
+
+  public short getDefaultValue() {
+    return defaultValue;
+  }
+
+  public void setDefaultValue(short defaultValue) {
+    this.defaultValue = defaultValue;
   }
 
   public boolean isCopyMinScore() {

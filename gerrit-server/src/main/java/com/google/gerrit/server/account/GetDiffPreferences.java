@@ -25,7 +25,9 @@ import com.google.gerrit.server.CurrentUser;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
+@Singleton
 public class GetDiffPreferences implements RestReadView<AccountResource> {
   private final Provider<CurrentUser> self;
   private final Provider<ReviewDb> db;
@@ -72,6 +74,7 @@ public class GetDiffPreferences implements RestReadView<AccountResource> {
       info.syntaxHighlighting = p.isSyntaxHighlighting() ? true : null;
       info.tabSize = p.getTabSize();
       info.renderEntireFile = p.isRenderEntireFile() ? true : null;
+      info.hideEmptyPane = p.isHideEmptyPane() ? true : null;
       info.theme = p.getTheme();
       return info;
     }
@@ -92,6 +95,7 @@ public class GetDiffPreferences implements RestReadView<AccountResource> {
     public Boolean hideTopMenu;
     public Boolean hideLineNumbers;
     public Boolean renderEntireFile;
+    public Boolean hideEmptyPane;
     public int tabSize;
     public Theme theme;
   }

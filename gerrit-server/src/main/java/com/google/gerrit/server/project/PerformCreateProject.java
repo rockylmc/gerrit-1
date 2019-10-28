@@ -22,12 +22,12 @@ import com.google.gerrit.common.data.GroupReference;
 import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRule;
 import com.google.gerrit.common.errors.ProjectCreationFailedException;
+import com.google.gerrit.extensions.common.SubmitType;
 import com.google.gerrit.extensions.events.NewProjectCreatedListener;
 import com.google.gerrit.extensions.registration.DynamicSet;
 import com.google.gerrit.reviewdb.client.AccountGroup;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.RefNames;
-import com.google.gerrit.reviewdb.client.Project.SubmitType;
 import com.google.gerrit.server.GerritPersonIdent;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.account.GroupBackend;
@@ -240,11 +240,10 @@ public class PerformCreateProject {
 
     if (createProjectArgs.ownerIds == null
         || createProjectArgs.ownerIds.isEmpty()) {
-      createProjectArgs.ownerIds =
-          new ArrayList<AccountGroup.UUID>(projectOwnerGroups);
+      createProjectArgs.ownerIds = new ArrayList<>(projectOwnerGroups);
     }
 
-    List<String> transformedBranches = new ArrayList<String>();
+    List<String> transformedBranches = new ArrayList<>();
     if (createProjectArgs.branch == null ||
         createProjectArgs.branch.isEmpty()) {
       createProjectArgs.branch = Collections.singletonList(Constants.MASTER);

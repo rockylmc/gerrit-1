@@ -18,6 +18,7 @@ import static com.google.inject.Scopes.SINGLETON;
 import static com.google.inject.Stage.PRODUCTION;
 
 import com.google.common.collect.Lists;
+import com.google.gerrit.common.Die;
 import com.google.gerrit.extensions.events.LifecycleListener;
 import com.google.gerrit.lifecycle.LifecycleModule;
 import com.google.gerrit.server.config.GerritServerConfig;
@@ -89,7 +90,7 @@ public abstract class SiteProgram extends AbstractProgram {
   /** @return provides database connectivity and site path. */
   protected Injector createDbInjector(final DataSourceProvider.Context context) {
     final File sitePath = getSitePath();
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
 
     Module sitePathModule = new AbstractModule() {
       @Override

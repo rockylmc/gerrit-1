@@ -1,4 +1,6 @@
+/.apt_generated
 /.classpath
+/.factorypath
 /.project
 /.settings/org.maven.ide.eclipse.prefs
 /.settings/org.eclipse.m2e.core.prefs
@@ -16,4 +18,5 @@
 /local.properties
 *.pyc
 /gwt-unitCache
+*.swp
 *.asc

@@ -33,9 +33,11 @@ import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.io.IOException;
 
+@Singleton
 public class Rebase implements RestModifyView<RevisionResource, Input>,
     UiAction<RevisionResource> {
   public static class Input {
@@ -47,7 +49,9 @@ public class Rebase implements RestModifyView<RevisionResource, Input>,
   @Inject
   public Rebase(Provider<RebaseChange> rebaseChange, ChangeJson json) {
     this.rebaseChange = rebaseChange;
-    this.json = json;
+    this.json = json
+        .addOption(ListChangesOption.CURRENT_REVISION)
+        .addOption(ListChangesOption.CURRENT_COMMIT);
   }
 
   @Override
@@ -64,7 +68,8 @@ public class Rebase implements RestModifyView<RevisionResource, Input>,
     }
 
     try {
-      rebaseChange.get().rebase(rsrc.getPatchSet().getId(), rsrc.getUser());
+      rebaseChange.get().rebase(rsrc.getChange(), rsrc.getPatchSet().getId(),
+          rsrc.getUser());
     } catch (InvalidChangeOperationException e) {
       throw new ResourceConflictException(e.getMessage());
     } catch (IOException e) {
@@ -73,8 +78,6 @@ public class Rebase implements RestModifyView<RevisionResource, Input>,
       throw new ResourceNotFoundException(change.getId().toString());
     }
 
-    json.addOption(ListChangesOption.CURRENT_REVISION)
-        .addOption(ListChangesOption.CURRENT_COMMIT);
     return json.format(change.getId());
   }
 

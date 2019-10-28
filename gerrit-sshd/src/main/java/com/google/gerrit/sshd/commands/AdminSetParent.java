@@ -20,6 +20,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.gerrit.common.data.GlobalCapability;
 import com.google.gerrit.extensions.annotations.RequiresCapability;
+import com.google.gerrit.extensions.common.ProjectInfo;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.server.config.AllProjectsName;
 import com.google.gerrit.server.git.MetaDataUpdate;
@@ -27,7 +28,6 @@ import com.google.gerrit.server.git.ProjectConfig;
 import com.google.gerrit.server.project.ListChildProjects;
 import com.google.gerrit.server.project.ProjectCache;
 import com.google.gerrit.server.project.ProjectControl;
-import com.google.gerrit.server.project.ProjectJson.ProjectInfo;
 import com.google.gerrit.server.project.ProjectResource;
 import com.google.gerrit.server.project.ProjectState;
 import com.google.gerrit.sshd.CommandMetaData;
@@ -63,11 +63,11 @@ final class AdminSetParent extends SshCommand {
 
   @Option(name = "--exclude", metaVar = "NAME",
       usage = "child project of old parent project which should not be reparented")
-  private List<ProjectControl> excludedChildren = new ArrayList<ProjectControl>();
+  private List<ProjectControl> excludedChildren = new ArrayList<>();
 
   @Argument(index = 0, required = false, multiValued = true, metaVar = "NAME",
       usage = "projects to modify")
-  private List<ProjectControl> children = new ArrayList<ProjectControl>();
+  private List<ProjectControl> children = new ArrayList<>();
 
   @Inject
   private ProjectCache projectCache;
@@ -95,7 +95,7 @@ final class AdminSetParent extends SshCommand {
     }
 
     final StringBuilder err = new StringBuilder();
-    final Set<Project.NameKey> grandParents = new HashSet<Project.NameKey>();
+    final Set<Project.NameKey> grandParents = new HashSet<>();
 
     grandParents.add(allProjectsName);
 
@@ -187,12 +187,12 @@ final class AdminSetParent extends SshCommand {
   private List<Project.NameKey> getChildrenForReparenting(final ProjectControl parent) {
     final List<Project.NameKey> childProjects = Lists.newArrayList();
     final List<Project.NameKey> excluded =
-      new ArrayList<Project.NameKey>(excludedChildren.size());
+        new ArrayList<>(excludedChildren.size());
     for (final ProjectControl excludedChild : excludedChildren) {
       excluded.add(excludedChild.getProject().getNameKey());
     }
     final List<Project.NameKey> automaticallyExcluded =
-      new ArrayList<Project.NameKey>(excludedChildren.size());
+        new ArrayList<>(excludedChildren.size());
     if (newParentKey != null) {
       automaticallyExcluded.addAll(getAllParents(newParentKey));
     }

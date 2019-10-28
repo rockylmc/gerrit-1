@@ -31,21 +31,24 @@ import com.google.gerrit.server.group.AddIncludedGroups.PutIncludedGroup;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
+@Singleton
 public class IncludedGroupsCollection implements
     ChildCollection<GroupResource, IncludedGroupResource>,
     AcceptsCreate<GroupResource> {
   private final DynamicMap<RestView<IncludedGroupResource>> views;
-  private final Provider<ListIncludedGroups> list;
-  private final Provider<GroupsCollection> groupsCollection;
+  private final ListIncludedGroups list;
+  private final GroupsCollection groupsCollection;
   private final Provider<ReviewDb> dbProvider;
-  private final Provider<AddIncludedGroups> put;
+  private final AddIncludedGroups put;
 
   @Inject
   IncludedGroupsCollection(DynamicMap<RestView<IncludedGroupResource>> views,
-      Provider<ListIncludedGroups> list,
-      Provider<GroupsCollection> groupsCollection,
-      Provider<ReviewDb> dbProvider, Provider<AddIncludedGroups> put) {
+      ListIncludedGroups list,
+      GroupsCollection groupsCollection,
+      Provider<ReviewDb> dbProvider,
+      AddIncludedGroups put) {
     this.views = views;
     this.list = list;
     this.groupsCollection = groupsCollection;
@@ -55,7 +58,7 @@ public class IncludedGroupsCollection implements
 
   @Override
   public RestView<GroupResource> list() {
-    return list.get();
+    return list;
   }
 
   @Override
@@ -68,7 +71,7 @@ public class IncludedGroupsCollection implements
     }
 
     GroupDescription.Basic member =
-        groupsCollection.get().parse(TopLevelResource.INSTANCE, id).getGroup();
+        groupsCollection.parse(TopLevelResource.INSTANCE, id).getGroup();
     if (isMember(parent, member)
         && resource.getControl().canSeeGroup(member.getGroupUUID())) {
       return new IncludedGroupResource(resource, member);

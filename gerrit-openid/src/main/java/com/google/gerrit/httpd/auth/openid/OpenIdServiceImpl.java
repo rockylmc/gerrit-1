@@ -16,6 +16,8 @@ package com.google.gerrit.httpd.auth.openid;
 
 import com.google.gerrit.common.PageLinks;
 import com.google.gerrit.common.auth.openid.OpenIdUrls;
+import com.google.gerrit.extensions.registration.DynamicItem;
+import com.google.gerrit.extensions.restapi.Url;
 import com.google.gerrit.httpd.CanonicalWebUrl;
 import com.google.gerrit.httpd.WebSession;
 import com.google.gerrit.reviewdb.client.Account;
@@ -90,7 +92,7 @@ class OpenIdServiceImpl {
   private static final String SCHEMA_LASTNAME =
       "http://schema.openid.net/namePerson/last";
 
-  private final Provider<WebSession> webSession;
+  private final DynamicItem<WebSession> webSession;
   private final Provider<IdentifiedUser> identifiedUser;
   private final CanonicalWebUrl urlProvider;
   private final AccountManager accountManager;
@@ -102,7 +104,7 @@ class OpenIdServiceImpl {
   private final int papeMaxAuthAge;
 
   @Inject
-  OpenIdServiceImpl(final Provider<WebSession> cf,
+  OpenIdServiceImpl(final DynamicItem<WebSession> cf,
       final Provider<IdentifiedUser> iu,
       CanonicalWebUrl up,
       @GerritServerConfig final Config config, final AuthConfig ac,
@@ -155,6 +157,7 @@ class OpenIdServiceImpl {
     final AuthRequest aReq;
     try {
       aReq = manager.authenticate(state.discovered, state.retTo.toString());
+      log.debug("OpenID: openid-realm={}", state.contextUrl);
       aReq.setRealm(state.contextUrl);
 
       if (requestRegistration(aReq)) {
@@ -482,11 +485,10 @@ class OpenIdServiceImpl {
 
     final StringBuilder rdr = new StringBuilder();
     rdr.append(urlProvider.get(req));
-    rdr.append('#');
     if (isNew && !token.startsWith(PageLinks.REGISTER + "/")) {
-      rdr.append(PageLinks.REGISTER);
+      rdr.append('#' + PageLinks.REGISTER);
     }
-    rdr.append(token);
+    rdr.append(Url.decode(token));
     rsp.sendRedirect(rdr.toString());
   }
 

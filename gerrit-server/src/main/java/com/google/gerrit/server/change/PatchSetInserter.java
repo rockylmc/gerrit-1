@@ -28,6 +28,7 @@ import com.google.gerrit.reviewdb.client.RevId;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalCopier;
 import com.google.gerrit.server.ApprovalsUtil;
+import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.events.CommitReceivedEvent;
@@ -40,6 +41,7 @@ import com.google.gerrit.server.notedb.ReviewerState;
 import com.google.gerrit.server.patch.PatchSetInfoFactory;
 import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.server.project.InvalidChangeOperationException;
+import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gerrit.server.ssh.NoSshInfo;
 import com.google.gerrit.server.ssh.SshInfo;
 import com.google.gerrit.server.util.TimeUtil;
@@ -82,12 +84,14 @@ public class PatchSetInserter {
   private final PatchSetInfoFactory patchSetInfoFactory;
   private final ReviewDb db;
   private final ChangeUpdate.Factory updateFactory;
+  private final ChangeControl.GenericFactory ctlFactory;
   private final GitReferenceUpdated gitRefUpdated;
   private final CommitValidators.Factory commitValidatorsFactory;
   private final MergeabilityChecker mergeabilityChecker;
   private final ReplacePatchSetSender.Factory replacePatchSetFactory;
   private final ApprovalsUtil approvalsUtil;
   private final ApprovalCopier approvalCopier;
+  private final ChangeMessagesUtil cmUtil;
 
   private final Repository git;
   private final RevWalk revWalk;
@@ -109,8 +113,10 @@ public class PatchSetInserter {
   public PatchSetInserter(ChangeHooks hooks,
       ReviewDb db,
       ChangeUpdate.Factory updateFactory,
+      ChangeControl.GenericFactory ctlFactory,
       ApprovalsUtil approvalsUtil,
       ApprovalCopier approvalCopier,
+      ChangeMessagesUtil cmUtil,
       PatchSetInfoFactory patchSetInfoFactory,
       GitReferenceUpdated gitRefUpdated,
       CommitValidators.Factory commitValidatorsFactory,
@@ -126,8 +132,10 @@ public class PatchSetInserter {
     this.hooks = hooks;
     this.db = db;
     this.updateFactory = updateFactory;
+    this.ctlFactory = ctlFactory;
     this.approvalsUtil = approvalsUtil;
     this.approvalCopier = approvalCopier;
+    this.cmUtil = cmUtil;
     this.patchSetInfoFactory = patchSetInfoFactory;
     this.gitRefUpdated = gitRefUpdated;
     this.commitValidatorsFactory = commitValidatorsFactory;
@@ -211,7 +219,7 @@ public class PatchSetInserter {
   }
 
   public Change insert() throws InvalidChangeOperationException, OrmException,
-      IOException {
+      IOException, NoSuchChangeException {
     init();
     validate();
 
@@ -272,17 +280,19 @@ public class PatchSetInserter {
       }
 
       if (messageIsForChange()) {
-        insertMessage(db);
+        cmUtil.addChangeMessage(db, update, changeMessage);
       }
 
       if (copyLabels) {
         approvalCopier.copy(db, ctl, patchSet);
       }
       db.commit();
-      update.commit();
+      if (messageIsForChange()) {
+        update.commit();
+      }
 
       if (!messageIsForChange()) {
-        insertMessage(db);
+        commitMessageNotForChange(updatedChange);
       }
 
       if (sendMail) {
@@ -313,6 +323,20 @@ public class PatchSetInserter {
       hooks.doPatchsetCreatedHook(updatedChange, patchSet, db);
     }
     return updatedChange;
+  }
+
+  private void commitMessageNotForChange(Change updatedChange)
+      throws OrmException, NoSuchChangeException, IOException {
+    if (changeMessage != null) {
+      Change otherChange =
+          db.changes().get(changeMessage.getPatchSetId().getParentKey());
+      ChangeControl otherControl =
+          ctlFactory.controlFor(otherChange, user);
+      ChangeUpdate updateForOtherChange =
+          updateFactory.create(otherControl, updatedChange.getLastUpdatedOn());
+      cmUtil.addChangeMessage(db, updateForOtherChange, changeMessage);
+      updateForOtherChange.commit();
+    }
   }
 
   private void init() throws IOException {
@@ -364,12 +388,6 @@ public class PatchSetInserter {
   private boolean messageIsForChange() {
     return changeMessage != null && changeMessage.getKey().getParentKey()
         .equals(patchSet.getId().getParentKey());
-  }
-
-  private void insertMessage(ReviewDb db) throws OrmException {
-    if (changeMessage != null) {
-      db.changeMessages().insert(Collections.singleton(changeMessage));
-    }
   }
 
   public class ChangeModifiedException extends InvalidChangeOperationException {

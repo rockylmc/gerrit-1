@@ -29,9 +29,11 @@ import com.google.gerrit.reviewdb.client.Patch.ChangeType;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.PatchLineCommentsUtil;
 import com.google.gerrit.server.account.AccountInfoCacheFactory;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.LargeObjectException;
+import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gwtorm.server.OrmException;
@@ -71,6 +73,7 @@ public class PatchScriptFactory implements Callable<PatchScript> {
   private final PatchListCache patchListCache;
   private final ReviewDb db;
   private final AccountInfoCacheFactory.Factory aicFactory;
+  private final PatchLineCommentsUtil plcUtil;
 
   private final String fileName;
   @Nullable
@@ -79,6 +82,8 @@ public class PatchScriptFactory implements Callable<PatchScript> {
   private final AccountDiffPreference diffPrefs;
 
   private final Change.Id changeId;
+  private boolean loadHistory = true;
+  private boolean loadComments = true;
 
   private Change change;
   private Project.NameKey projectKey;
@@ -93,6 +98,7 @@ public class PatchScriptFactory implements Callable<PatchScript> {
       Provider<PatchScriptBuilder> builderFactory,
       final PatchListCache patchListCache, final ReviewDb db,
       final AccountInfoCacheFactory.Factory aicFactory,
+      PatchLineCommentsUtil plcUtil,
       @Assisted ChangeControl control,
       @Assisted final String fileName,
       @Assisted("patchSetA") @Nullable final PatchSet.Id patchSetA,
@@ -104,6 +110,7 @@ public class PatchScriptFactory implements Callable<PatchScript> {
     this.db = db;
     this.control = control;
     this.aicFactory = aicFactory;
+    this.plcUtil = plcUtil;
 
     this.fileName = fileName;
     this.psa = patchSetA;
@@ -111,6 +118,14 @@ public class PatchScriptFactory implements Callable<PatchScript> {
     this.diffPrefs = diffPrefs;
 
     changeId = patchSetB.getParentKey();
+  }
+
+  public void setLoadHistory(boolean load) {
+    loadHistory = load;
+  }
+
+  public void setLoadComments(boolean load) {
+    loadComments = load;
   }
 
   @Override
@@ -149,7 +164,7 @@ public class PatchScriptFactory implements Callable<PatchScript> {
           content.getOldName(), //
           content.getNewName());
 
-        return b.toPatchScript(content, comments, history);
+      return b.toPatchScript(content, comments, history);
     } catch (PatchListNotAvailableException e) {
       throw new NoSuchChangeException(changeId, e);
     } catch (IOException e) {
@@ -212,98 +227,102 @@ public class PatchScriptFactory implements Callable<PatchScript> {
 
   private void loadCommentsAndHistory(final ChangeType changeType,
       final String oldName, final String newName) throws OrmException {
-    history = new ArrayList<Patch>();
-    comments = new CommentDetail(psa, psb);
+    final Map<Patch.Key, Patch> byKey = new HashMap<>();
 
-    final Map<Patch.Key, Patch> byKey = new HashMap<Patch.Key, Patch>();
-    final AccountInfoCacheFactory aic = aicFactory.create();
-
-    // This seems like a cheap trick. It doesn't properly account for a
-    // file that gets renamed between patch set 1 and patch set 2. We
-    // will wind up packing the wrong Patch object because we didn't do
-    // proper rename detection between the patch sets.
-    //
-    for (final PatchSet ps : db.patchSets().byChange(changeId)) {
-      if (!control.isPatchVisible(ps, db)) {
-        continue;
-      }
-      String name = fileName;
-      if (psa != null) {
-        switch (changeType) {
-          case COPIED:
-          case RENAMED:
-            if (ps.getId().equals(psa)) {
-              name = oldName;
-            }
-            break;
-
-          case MODIFIED:
-          case DELETED:
-          case ADDED:
-          case REWRITE:
-            break;
+    if (loadHistory) {
+      // This seems like a cheap trick. It doesn't properly account for a
+      // file that gets renamed between patch set 1 and patch set 2. We
+      // will wind up packing the wrong Patch object because we didn't do
+      // proper rename detection between the patch sets.
+      //
+      history = new ArrayList<>();
+      for (final PatchSet ps : db.patchSets().byChange(changeId)) {
+        if (!control.isPatchVisible(ps, db)) {
+          continue;
         }
-      }
-
-      final Patch p = new Patch(new Patch.Key(ps.getId(), name));
-      history.add(p);
-      byKey.put(p.getKey(), p);
-    }
-
-    switch (changeType) {
-      case ADDED:
-      case MODIFIED:
-        loadPublished(byKey, aic, newName);
-        break;
-
-      case DELETED:
-        loadPublished(byKey, aic, newName);
-        break;
-
-      case COPIED:
-      case RENAMED:
+        String name = fileName;
         if (psa != null) {
-          loadPublished(byKey, aic, oldName);
-        }
-        loadPublished(byKey, aic, newName);
-        break;
+          switch (changeType) {
+            case COPIED:
+            case RENAMED:
+              if (ps.getId().equals(psa)) {
+                name = oldName;
+              }
+              break;
 
-      case REWRITE:
-        break;
+            case MODIFIED:
+            case DELETED:
+            case ADDED:
+            case REWRITE:
+              break;
+          }
+        }
+
+        final Patch p = new Patch(new Patch.Key(ps.getId(), name));
+        history.add(p);
+        byKey.put(p.getKey(), p);
+      }
     }
 
-    final CurrentUser user = control.getCurrentUser();
-    if (user.isIdentifiedUser()) {
-      final Account.Id me = ((IdentifiedUser) user).getAccountId();
+    if (loadComments) {
+      final AccountInfoCacheFactory aic = aicFactory.create();
+      comments = new CommentDetail(psa, psb);
       switch (changeType) {
         case ADDED:
         case MODIFIED:
-          loadDrafts(byKey, aic, me, newName);
+          loadPublished(byKey, aic, newName);
           break;
 
         case DELETED:
-          loadDrafts(byKey, aic, me, newName);
+          loadPublished(byKey, aic, newName);
           break;
 
         case COPIED:
         case RENAMED:
           if (psa != null) {
-            loadDrafts(byKey, aic, me, oldName);
+            loadPublished(byKey, aic, oldName);
           }
-          loadDrafts(byKey, aic, me, newName);
+          loadPublished(byKey, aic, newName);
           break;
 
         case REWRITE:
           break;
       }
-    }
 
-    comments.setAccountInfoCache(aic.create());
+      final CurrentUser user = control.getCurrentUser();
+      if (user.isIdentifiedUser()) {
+        final Account.Id me = ((IdentifiedUser) user).getAccountId();
+        switch (changeType) {
+          case ADDED:
+          case MODIFIED:
+            loadDrafts(byKey, aic, me, newName);
+            break;
+
+          case DELETED:
+            loadDrafts(byKey, aic, me, newName);
+            break;
+
+          case COPIED:
+          case RENAMED:
+            if (psa != null) {
+              loadDrafts(byKey, aic, me, oldName);
+            }
+            loadDrafts(byKey, aic, me, newName);
+            break;
+
+          case REWRITE:
+            break;
+        }
+      }
+
+      comments.setAccountInfoCache(aic.create());
+    }
   }
 
   private void loadPublished(final Map<Patch.Key, Patch> byKey,
       final AccountInfoCacheFactory aic, final String file) throws OrmException {
-    for (PatchLineComment c : db.patchComments().publishedByChangeFile(changeId, file)) {
+    ChangeNotes notes = control.getNotes();
+    for (PatchLineComment c : plcUtil.publishedByChangeFile(db, notes, changeId, file)) {
       if (comments.include(c)) {
         aic.want(c.getAuthor());
       }

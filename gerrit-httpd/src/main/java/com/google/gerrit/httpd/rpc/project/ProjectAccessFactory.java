@@ -114,8 +114,8 @@ class ProjectAccessFactory extends Handler<ProjectAccess> {
     }
 
     final RefControl metaConfigControl = pc.controlForRef(RefNames.REFS_CONFIG);
-    List<AccessSection> local = new ArrayList<AccessSection>();
-    Set<String> ownerOf = new HashSet<String>();
+    List<AccessSection> local = new ArrayList<>();
+    Set<String> ownerOf = new HashSet<>();
     Map<AccountGroup.UUID, Boolean> visibleGroups = new HashMap<>();
 
     for (AccessSection section : config.getAccessSections()) {
@@ -206,8 +206,6 @@ class ProjectAccessFactory extends Handler<ProjectAccess> {
     detail.setOwnerOf(ownerOf);
     detail.setCanUpload(pc.isOwner()
         || (metaConfigControl.isVisible() && metaConfigControl.canUpload()));
-    detail.setCanChangeParent(pc.getCurrentUser().getCapabilities()
-        .canAdministrateServer());
     detail.setConfigVisible(pc.isOwner() || metaConfigControl.isVisible());
     detail.setGroupInfo(buildGroupInfo(local));
     detail.setLabelTypes(pc.getLabelTypes());

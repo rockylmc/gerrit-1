@@ -24,25 +24,30 @@ import com.google.gerrit.extensions.webui.UiAction;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.ChangeMessage;
 import com.google.gerrit.reviewdb.server.ReviewDb;
+import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.change.PutTopic.Input;
 import com.google.gerrit.server.index.ChangeIndexer;
+import com.google.gerrit.server.notedb.ChangeUpdate;
 import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.server.util.TimeUtil;
 import com.google.gwtorm.server.AtomicUpdate;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.io.IOException;
-import java.util.Collections;
 
+@Singleton
 class PutTopic implements RestModifyView<ChangeResource, Input>,
     UiAction<ChangeResource> {
   private final Provider<ReviewDb> dbProvider;
   private final ChangeIndexer indexer;
   private final ChangeHooks hooks;
+  private final ChangeUpdate.Factory updateFactory;
+  private final ChangeMessagesUtil cmUtil;
 
   static class Input {
     @DefaultInput
@@ -51,10 +56,13 @@ class PutTopic implements RestModifyView<ChangeResource, Input>,
 
   @Inject
   PutTopic(Provider<ReviewDb> dbProvider, ChangeIndexer indexer,
-      ChangeHooks hooks) {
+      ChangeHooks hooks, ChangeUpdate.Factory updateFactory,
+      ChangeMessagesUtil cmUtil) {
     this.dbProvider = dbProvider;
     this.indexer = indexer;
     this.hooks = hooks;
+    this.updateFactory = updateFactory;
+    this.cmUtil = cmUtil;
   }
 
   @Override
@@ -91,6 +99,7 @@ class PutTopic implements RestModifyView<ChangeResource, Input>,
           currentUser.getAccountId(), TimeUtil.nowTs(),
           change.currentPatchSetId());
       cmsg.setMessage(summary);
+      ChangeUpdate update;
 
       db.changes().beginTransaction(change.getId());
       try {
@@ -103,11 +112,16 @@ class PutTopic implements RestModifyView<ChangeResource, Input>,
               return change;
             }
           });
-        db.changeMessages().insert(Collections.singleton(cmsg));
+
+        //TODO(yyonas): atomic update was not propagated
+        update = updateFactory.create(control);
+        cmUtil.addChangeMessage(db, update, cmsg);
+
         db.commit();
       } finally {
         db.rollback();
       }
+      update.commit();
       indexer.index(db, change);
       hooks.doTopicChangedHook(change, currentUser.getAccount(),
           oldTopicName, db);

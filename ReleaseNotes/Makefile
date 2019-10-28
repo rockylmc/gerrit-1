@@ -14,39 +14,15 @@
 
 ASCIIDOC       ?= asciidoc
 ASCIIDOC_EXTRA ?=
-SVN            ?= svn
-PUB_ROOT       ?= https://gerrit-documentation.googlecode.com/svn/ReleaseNotes
 
 DOC_HTML      := $(patsubst %.txt,%.html,$(wildcard ReleaseNotes*.txt))
-COMMIT        := $(shell git describe HEAD | sed s/^v//)
-LOCAL_ROOT    := .published
-PUB_DIR       := $(PUB_ROOT)
 
 all: html
 
 html: index.html $(DOC_HTML)
 
-update: html
-	@-rm -rf $(LOCAL_ROOT)
-	@echo "Checking out current release notes"
-	@$(SVN) checkout $(PUB_DIR) $(LOCAL_ROOT)
-	@rm -f $(LOCAL_ROOT)/*.html
-	@cp *.html $(LOCAL_ROOT)
-	@cd $(LOCAL_ROOT) && \
-	  r=`$(SVN) status | perl -ne 'print if s/^!  *//' ` && \
-	  if [ -n "$$r" ]; then $(SVN) rm $$r; fi && \
-	  a=`$(SVN) status | perl -ne 'print if s/^\?  *//' ` && \
-	  if [ -n "$$a" ]; then \
-	    $(SVN) add $$a && \
-	    $(SVN) propset svn:mime-type text/html $$a ; \
-	    fi && \
-	  echo "Committing release notes at v$(COMMIT)" && \
-	  $(SVN) commit -m "Updated release notes to v$(COMMIT)"
-	@-rm -rf $(LOCAL_ROOT)
-
 clean:
 	rm -f *.html
-	rm -rf $(LOCAL_ROOT)
 
 index.html: index.txt
 	@echo FORMAT $@
@@ -61,9 +37,8 @@ $(DOC_HTML): %.html : %.txt
 	@echo FORMAT $@
 	@rm -f $@+ $@
 	@v=$$(echo $< | sed 's/^ReleaseNotes-//;s/.txt$$//;') && \
-	 c=$$(git rev-list -1 HEAD -- $<) && \
-	 n=$$(git describe $$c) && \
-	 if [ "X$$n" != "Xv$$v" ]; then v="$$v (from $$n)"; fi && \
+	 n=$$(git describe HEAD) && \
+	 if ! git diff-index --quiet v$$v -- $< 2>/dev/null; then v="$$v (from $$n)"; fi && \
 	 $(ASCIIDOC) --unsafe \
 		-a toc \
 		-a "revision=$$v" \

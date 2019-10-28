@@ -14,6 +14,7 @@
 
 package com.google.gerrit.client.diff;
 
+import static com.google.gerrit.reviewdb.client.AccountDiffPreference.WHOLE_FILE_CONTEXT;
 import static java.lang.Double.POSITIVE_INFINITY;
 
 import com.google.gerrit.client.Gerrit;
@@ -24,6 +25,7 @@ import com.google.gerrit.client.changes.ChangeApi;
 import com.google.gerrit.client.changes.ChangeInfo;
 import com.google.gerrit.client.changes.ChangeInfo.RevisionInfo;
 import com.google.gerrit.client.changes.ChangeList;
+import com.google.gerrit.client.diff.DiffInfo.FileMeta;
 import com.google.gerrit.client.diff.LineMapper.LineOnOtherInfo;
 import com.google.gerrit.client.patches.PatchUtil;
 import com.google.gerrit.client.projects.ConfigInfoCache;
@@ -83,6 +85,18 @@ public class SideBySide2 extends Screen {
   interface Binder extends UiBinder<FlowPanel, SideBySide2> {}
   private static final Binder uiBinder = GWT.create(Binder.class);
 
+  enum FileSize {
+    SMALL(0),
+    LARGE(500),
+    HUGE(4000);
+
+    final int lines;
+
+    FileSize(int n) {
+      this.lines = n;
+    }
+  }
+
   @UiField(provided = true)
   Header header;
 
@@ -102,9 +116,12 @@ public class SideBySide2 extends Screen {
   private Element columnMarginA;
   private Element columnMarginB;
   private double charWidthPx;
+  private double lineHeightPx;
+
   private HandlerRegistration resizeHandler;
+  private ScrollSynchronizer scrollSynchronizer;
   private DiffInfo diff;
-  private boolean largeFile;
+  private FileSize fileSize;
   private ChunkManager chunkManager;
   private CommentManager commentManager;
   private SkipManager skipManager;
@@ -164,9 +181,9 @@ public class SideBySide2 extends Screen {
         @Override
         public void onSuccess(DiffInfo diffInfo) {
           diff = diffInfo;
+          fileSize = bucketFileSize(diffInfo);
           if (prefs.syntaxHighlighting()) {
-            largeFile = isLargeFile(diffInfo);
-            if (largeFile) {
+            if (fileSize.compareTo(FileSize.SMALL) > 0) {
               modeInjectorCb.onSuccess(null);
             } else {
               injectMode(diffInfo, modeInjectorCb);
@@ -189,7 +206,7 @@ public class SideBySide2 extends Screen {
         info.revisions().copyKeysIntoChildren("name");
         JsArray<RevisionInfo> list = info.revisions().values();
         RevisionInfo.sortRevisionInfoByNumber(list);
-        diffTable.setUpPatchSetNav(list, diff);
+        diffTable.set(prefs, list, diff);
         header.setChangeInfo(info);
       }}));
 
@@ -228,18 +245,24 @@ public class SideBySide2 extends Screen {
       public void run() {
         cmA.setHeight(height);
         cmB.setHeight(height);
+        chunkManager.adjustPadding();
         cmA.refresh();
         cmB.refresh();
       }
     });
     setLineLength(prefs.lineLength());
-    diffTable.overview.refresh();
+    diffTable.refresh();
 
-    if (startLine == 0 && diff.meta_b() != null) {
+    if (startLine == 0) {
       DiffChunkInfo d = chunkManager.getFirst();
       if (d != null) {
-        startSide = d.getSide();
-        startLine = d.getStart() + 1;
+        if (d.isEdit() && d.getSide() == DisplaySide.A) {
+          startSide = DisplaySide.B;
+          startLine = lineOnOther(d.getSide(), d.getStart()).getLine() + 1;
+        } else {
+          startSide = d.getSide();
+          startLine = d.getStart() + 1;
+        }
       }
     }
     if (startSide != null && startLine > 0) {
@@ -312,8 +335,9 @@ public class SideBySide2 extends Screen {
         .on("C", commentManager.insertNewDraft(cm))
         .on("N", maybeNextVimSearch(cm))
         .on("P", chunkManager.diffChunkNav(cm, Direction.PREV))
+        .on("Shift-A", diffTable.toggleA())
         .on("Shift-M", header.reviewedAndNext())
-        .on("Shift-N", commentManager.commentNav(cm, Direction.NEXT))
+        .on("Shift-N", maybePrevVimSearch(cm))
         .on("Shift-P", commentManager.commentNav(cm, Direction.PREV))
         .on("Shift-O", commentManager.openCloseAll(cm))
         .on("Shift-Left", moveCursorToSide(cm, DisplaySide.A))
@@ -406,6 +430,9 @@ public class SideBySide2 extends Screen {
 
     keysNavigation.add(new UpToChangeCommand2(revision, 0, 'u'));
     keysNavigation.add(
+        new NoOpKeyCommand(KeyCommand.M_SHIFT, KeyCodes.KEY_LEFT, PatchUtil.C.focusSideA()),
+        new NoOpKeyCommand(KeyCommand.M_SHIFT, KeyCodes.KEY_RIGHT, PatchUtil.C.focusSideB()));
+    keysNavigation.add(
         new NoOpKeyCommand(0, 'j', PatchUtil.C.lineNext()),
         new NoOpKeyCommand(0, 'k', PatchUtil.C.linePrev()));
     keysNavigation.add(
@@ -444,6 +471,13 @@ public class SideBySide2 extends Screen {
         upToChange(true).run();
       }
     });
+    keysAction.add(new KeyCommand(
+        KeyCommand.M_SHIFT, 'a', PatchUtil.C.toggleSideA()) {
+      @Override
+      public void onKeyPress(KeyPressEvent event) {
+        diffTable.toggleA().run();
+      }
+    });
     keysAction.add(new KeyCommand(0, ',', PatchUtil.C.showPreferences()) {
       @Override
       public void onKeyPress(KeyPressEvent event) {
@@ -472,11 +506,11 @@ public class SideBySide2 extends Screen {
     }
 
     removeKeyHandlerRegistrations();
+    handlers.add(GlobalKey.add(this, keysAction));
     handlers.add(GlobalKey.add(this, keysNavigation));
     if (keysComment != null) {
       handlers.add(GlobalKey.add(this, keysComment));
     }
-    handlers.add(GlobalKey.add(this, keysAction));
     handlers.add(ShowHelpCommand.addFocusHandler(new FocusHandler() {
       @Override
       public void onFocus(FocusEvent event) {
@@ -506,6 +540,11 @@ public class SideBySide2 extends Screen {
     cmA.getMoverElement().appendChild(columnMarginA);
     cmB.getMoverElement().appendChild(columnMarginB);
 
+    if (prefs.renderEntireFile() && !canEnableRenderEntireFile(prefs)) {
+      // CodeMirror is too slow to layout an entire huge file.
+      prefs.renderEntireFile(false);
+    }
+
     operation(new Runnable() {
       public void run() {
         // Estimate initial CM3 height, fixed up in onShowView.
@@ -522,12 +561,13 @@ public class SideBySide2 extends Screen {
 
     registerCmEvents(cmA);
     registerCmEvents(cmB);
-    new ScrollSynchronizer(diffTable, cmA, cmB, chunkManager.getLineMapper());
+    scrollSynchronizer = new ScrollSynchronizer(diffTable, cmA, cmB,
+            chunkManager.getLineMapper());
 
     prefsAction = new PreferencesAction(this, prefs);
     header.init(prefsAction);
 
-    if (largeFile && prefs.syntaxHighlighting()) {
+    if (prefs.syntaxHighlighting() && fileSize.compareTo(FileSize.SMALL) > 0) {
       Scheduler.get().scheduleFixedDelay(new RepeatingCommand() {
         @Override
         public boolean execute() {
@@ -545,13 +585,16 @@ public class SideBySide2 extends Screen {
       String contents,
       DisplaySide side,
       Element parent) {
+    String mode = fileSize == FileSize.SMALL
+        ? getContentType(meta)
+        : null;
     return CodeMirror.create(side, parent, Configuration.create()
       .set("readOnly", true)
       .set("cursorBlinkRate", 0)
       .set("cursorHeight", 0.85)
       .set("lineNumbers", prefs.showLineNumbers())
       .set("tabSize", prefs.tabSize())
-      .set("mode", largeFile ? null : getContentType(meta))
+      .set("mode", mode)
       .set("lineWrapping", false)
       .set("styleSelectedText", true)
       .set("showTrailingSpace", prefs.showWhitespaceErrors())
@@ -563,6 +606,15 @@ public class SideBySide2 extends Screen {
 
   DiffInfo.IntraLineStatus getIntraLineStatus() {
     return diff.intraline_status();
+  }
+
+  boolean canEnableRenderEntireFile(DiffPreferences prefs) {
+    return fileSize.compareTo(FileSize.HUGE) < 0
+        || (prefs.context() != WHOLE_FILE_CONTEXT && prefs.context() < 100);
+  }
+
+  String getContentType() {
+    return getContentType(diff.meta_b());
   }
 
   void setThemeStyles(boolean d) {
@@ -587,6 +639,26 @@ public class SideBySide2 extends Screen {
     columnMarginB.getStyle().setMarginLeft(w, Style.Unit.PX);
   }
 
+  double getLineHeightPx() {
+    if (lineHeightPx <= 1) {
+      Element p = DOM.createDiv();
+      int lines = 1;
+      for (int i = 0; i < lines; i++) {
+        Element e = DOM.createDiv();
+        p.appendChild(e);
+
+        Element pre = DOM.createElement("pre");
+        pre.setInnerText("gqyŚŻŹŃ");
+        e.appendChild(pre);
+      }
+
+      cmB.getMeasureElement().appendChild(p);
+      lineHeightPx = ((double) p.getOffsetHeight()) / lines;
+      p.removeFromParent();
+    }
+    return lineHeightPx;
+  }
+
   private double getCharWidthPx() {
     if (charWidthPx <= 1) {
       int len = 100;
@@ -598,11 +670,11 @@ public class SideBySide2 extends Screen {
       e.getStyle().setDisplay(Style.Display.INLINE_BLOCK);
       e.setInnerText(s.toString());
 
-      cmA.getMoverElement().appendChild(e);
+      cmA.getMeasureElement().appendChild(e);
       double a = ((double) e.getOffsetWidth()) / len;
       e.removeFromParent();
 
-      cmB.getMoverElement().appendChild(e);
+      cmB.getMeasureElement().appendChild(e);
       double b = ((double) e.getOffsetWidth()) / len;
       e.removeFromParent();
       charWidthPx = Math.max(a, b);
@@ -804,6 +876,19 @@ public class SideBySide2 extends Screen {
     };
   }
 
+  private Runnable maybePrevVimSearch(final CodeMirror cm) {
+    return new Runnable() {
+      @Override
+      public void run() {
+        if (cm.hasVimSearchHighlight()) {
+          CodeMirror.handleVimKey(cm, "N");
+        } else {
+          commentManager.commentNav(cm, Direction.NEXT).run();
+        }
+      }
+    };
+  }
+
   private Runnable maybeNextVimSearch(final CodeMirror cm) {
     return new Runnable() {
       @Override
@@ -842,6 +927,12 @@ public class SideBySide2 extends Screen {
         + diffTable.getHeaderHeight()
         + 5; // Estimate
     return Window.getClientHeight() - rest;
+  }
+
+  void syncScroll(DisplaySide masterSide) {
+    if (scrollSynchronizer != null) {
+      scrollSynchronizer.syncScroll(masterSide);
+    }
   }
 
   private String getContentType(DiffInfo.FileMeta meta) {
@@ -933,6 +1024,7 @@ public class SideBySide2 extends Screen {
                 diffTable.overview.clearDiffMarkers();
                 setShowIntraline(prefs.intralineDifference());
                 render(diff);
+                chunkManager.adjustPadding();
                 skipManager.render(prefs.context(), diff);
               }
             });
@@ -941,8 +1033,17 @@ public class SideBySide2 extends Screen {
       });
   }
 
-  private static boolean isLargeFile(DiffInfo diffInfo) {
-    return (diffInfo.meta_a() != null && diffInfo.meta_a().lines() > 500)
-        || (diffInfo.meta_b() != null && diffInfo.meta_b().lines() > 500);
+  private static FileSize bucketFileSize(DiffInfo diff) {
+    FileMeta a = diff.meta_a();
+    FileMeta b = diff.meta_b();
+    FileSize[] sizes = FileSize.values();
+    for (int i = sizes.length - 1; 0 <= i; i--) {
+      FileSize s = sizes[i];
+      if ((a != null && s.lines <= a.lines())
+          || (b != null && s.lines <= b.lines())) {
+        return s;
+      }
+    }
+    return FileSize.SMALL;
   }
 }

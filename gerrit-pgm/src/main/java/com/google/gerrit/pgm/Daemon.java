@@ -20,13 +20,14 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.gerrit.common.ChangeHookRunner;
 import com.google.gerrit.httpd.AllRequestFilter;
-import com.google.gerrit.httpd.CacheBasedWebSession;
 import com.google.gerrit.httpd.GerritUiOptions;
 import com.google.gerrit.httpd.GitOverHttpModule;
+import com.google.gerrit.httpd.H2CacheBasedWebSession;
 import com.google.gerrit.httpd.HttpCanonicalWebUrlProvider;
 import com.google.gerrit.httpd.RequestContextFilter;
 import com.google.gerrit.httpd.WebModule;
 import com.google.gerrit.httpd.WebSshGlueModule;
+import com.google.gerrit.httpd.auth.oauth.OAuthModule;
 import com.google.gerrit.httpd.auth.openid.OpenIdModule;
 import com.google.gerrit.httpd.plugins.HttpPluginModule;
 import com.google.gerrit.lifecycle.LifecycleManager;
@@ -52,7 +53,9 @@ import com.google.gerrit.server.config.CanonicalWebUrlProvider;
 import com.google.gerrit.server.config.GerritGlobalModule;
 import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.config.MasterNodeStartup;
+import com.google.gerrit.server.config.RestCacheAdminModule;
 import com.google.gerrit.server.contact.HttpContactStoreConnection;
+import com.google.gerrit.server.git.GarbageCollectionRunner;
 import com.google.gerrit.server.git.ReceiveCommitsExecutorModule;
 import com.google.gerrit.server.git.WorkQueue;
 import com.google.gerrit.server.index.DummyIndexModule;
@@ -60,7 +63,7 @@ import com.google.gerrit.server.index.IndexModule;
 import com.google.gerrit.server.index.IndexModule.IndexType;
 import com.google.gerrit.server.mail.SignedTokenEmailTokenVerifier;
 import com.google.gerrit.server.mail.SmtpEmailSender;
-import com.google.gerrit.server.patch.IntraLineWorkerPool;
+import com.google.gerrit.server.patch.DiffExecutorModule;
 import com.google.gerrit.server.plugins.PluginGuiceEnvironment;
 import com.google.gerrit.server.plugins.PluginRestApiModule;
 import com.google.gerrit.server.schema.DataSourceProvider;
@@ -304,26 +307,27 @@ public class Daemon extends SiteProgram {
   }
 
   private Injector createCfgInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     modules.add(new AuthConfigModule());
     return dbInjector.createChildInjector(modules);
   }
 
   private Injector createSysInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     modules.add(SchemaVersionCheck.module());
     modules.add(new LogFileCompressor.Module());
     modules.add(new WorkQueue.Module());
     modules.add(new ChangeHookRunner.Module());
     modules.add(new ReceiveCommitsExecutorModule());
     modules.add(new MergeabilityChecksExecutorModule());
-    modules.add(new IntraLineWorkerPool.Module());
+    modules.add(new DiffExecutorModule());
     modules.add(cfgInjector.getInstance(GerritGlobalModule.class));
     modules.add(new InternalAccountDirectory.Module());
     modules.add(new DefaultCacheFactory.Module());
     modules.add(new SmtpEmailSender.Module());
     modules.add(new SignedTokenEmailTokenVerifier.Module());
     modules.add(new PluginRestApiModule());
+    modules.add(new RestCacheAdminModule());
     modules.add(createIndexModule());
     if (Objects.firstNonNull(httpd, true)) {
       modules.add(new CanonicalWebUrlModule() {
@@ -354,6 +358,7 @@ public class Daemon extends SiteProgram {
         bind(GerritUiOptions.class).toInstance(new GerritUiOptions(headless));
       }
     });
+    modules.add(GarbageCollectionRunner.module());
     return cfgInjector.createChildInjector(modules);
   }
 
@@ -380,7 +385,7 @@ public class Daemon extends SiteProgram {
   }
 
   private Injector createSshInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     modules.add(sysInjector.getInstance(SshModule.class));
     if (!test) {
       modules.add(new SshHostKeyModule());
@@ -405,13 +410,13 @@ public class Daemon extends SiteProgram {
   }
 
   private Injector createWebInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     if (sshd) {
       modules.add(new ProjectQoSFilter.Module());
     }
     modules.add(RequestContextFilter.module());
     modules.add(AllRequestFilter.module());
-    modules.add(CacheBasedWebSession.module());
+    modules.add(H2CacheBasedWebSession.module());
     modules.add(HttpContactStoreConnection.module());
     modules.add(sysInjector.getInstance(GitOverHttpModule.class));
     modules.add(sysInjector.getInstance(WebModule.class));
@@ -426,6 +431,8 @@ public class Daemon extends SiteProgram {
     if (authConfig.getAuthType() == AuthType.OPENID ||
         authConfig.getAuthType() == AuthType.OPENID_SSO) {
       modules.add(new OpenIdModule());
+    } else if (authConfig.getAuthType() == AuthType.OAUTH) {
+      modules.add(new OAuthModule());
     }
     modules.add(sysInjector.getInstance(GetUserFilter.Module.class));
 
@@ -433,7 +440,7 @@ public class Daemon extends SiteProgram {
   }
 
   private Injector createHttpdInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     modules.add(new JettyModule(new JettyEnv(webInjector)));
     return webInjector.createChildInjector(modules);
   }

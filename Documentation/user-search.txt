@@ -43,11 +43,7 @@ text and let Gerrit figure out the meaning:
 Operators act as restrictions on the search.  As more operators
 are added to the same query string, they further restrict the
 returned results. Search can also be performed by typing only a
-text with no operator. It will try to match a project name by
-substring.
-
-E.g. Searching for just "gerrit is:starred" will try to match a
-project name by "gerrit" as substring.
+text with no operator, which will match against a variety of fields.
 
 [[age]]
 age:'AGE'::
@@ -126,6 +122,11 @@ Changes occurring in 'PROJECT'. If 'PROJECT' starts with `^` it
 matches project names by regular expression.  The
 link:http://www.brics.dk/automaton/[dk.brics.automaton
 library] is used for evaluation of such patterns.
+
+[[projects]]
+projects:'PREFIX'::
++
+Changes occurring in projects starting with 'PREFIX'.
 
 [[parentproject]]
 parentproject:'PROJECT'::
@@ -264,7 +265,7 @@ is:reviewer::
 True on any change where the current user is a reviewer.
 Same as `reviewer:self`.
 
-is:open::
+is:open, is:pending::
 +
 True if the change is either open or submitted, merge pending.
 
@@ -287,7 +288,7 @@ True if the change has no merge conflicts and could be merged into its
 destination branch.
 
 [[status]]
-status:open::
+status:open, status:pending::
 +
 True if the change state is either 'review in progress' or 'submitted,
 merge pending'.
@@ -312,6 +313,18 @@ Change has been merged into the branch.
 status:abandoned::
 +
 Change has been abandoned.
+
+[[size]]
+added:'RELATION''LINES', deleted:'RELATION''LINES', delta/size:'RELATION''LINES'::
++
+True if the number of lines added/deleted/changed satisfies the given relation
+for the given number of lines.
++
+For example, added:>50 will be true for any change which adds at least 50
+lines.
++
+Valid relations are >=, >, <=, <, or no relation, which will match if the
+number of lines is exactly equal.
 
 
 == Argument Quoting

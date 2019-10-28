@@ -23,26 +23,19 @@ import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.PeerDaemonUser;
 import com.google.gerrit.server.config.GerritServerConfig;
-import com.google.gerrit.server.config.SitePaths;
 import com.google.gerrit.server.util.IdGenerator;
-import com.google.gerrit.server.util.LogUtil;
+import com.google.gerrit.server.util.SystemLog;
 import com.google.gerrit.server.util.TimeUtil;
 import com.google.gerrit.sshd.SshScope.Context;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.inject.Singleton;
 
-import org.apache.log4j.Appender;
 import org.apache.log4j.AsyncAppender;
-import org.apache.log4j.DailyRollingFileAppender;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
-import org.apache.log4j.spi.ErrorHandler;
 import org.apache.log4j.spi.LoggingEvent;
 import org.eclipse.jgit.lib.Config;
-
-import java.io.File;
-import java.io.IOException;
 
 @Singleton
 class SshLog implements LifecycleListener {
@@ -62,7 +55,8 @@ class SshLog implements LifecycleListener {
 
   @Inject
   SshLog(final Provider<SshSession> session, final Provider<Context> context,
-      final SitePaths site, @GerritServerConfig Config config, AuditService auditService) {
+      SystemLog systemLog, @GerritServerConfig Config config,
+      AuditService auditService) {
     this.session = session;
     this.context = context;
     this.auditService = auditService;
@@ -71,36 +65,7 @@ class SshLog implements LifecycleListener {
       async = null;
       return;
     }
-
-    async = new AsyncAppender();
-    async.setBlocking(true);
-    async.setBufferSize(config.getInt("core", "asyncLoggingBufferSize", 64));
-    async.setLocationInfo(false);
-
-    if (LogUtil.shouldConfigureLogSystem()) {
-      final DailyRollingFileAppender dst = new DailyRollingFileAppender();
-      dst.setName(LOG_NAME);
-      dst.setLayout(new SshLogLayout());
-      dst.setEncoding("UTF-8");
-      dst.setFile(new File(resolve(site.logs_dir), LOG_NAME).getPath());
-      dst.setImmediateFlush(true);
-      dst.setAppend(true);
-      dst.setThreshold(Level.INFO);
-      dst.setErrorHandler(new DieErrorHandler());
-      dst.activateOptions();
-      dst.setErrorHandler(new LogLogHandler());
-      async.addAppender(dst);
-    } else {
-      Appender appender = log.getAppender(LOG_NAME);
-      if (appender != null) {
-        async.addAppender(appender);
-      } else {
-        log.warn("No appender with the name: "
-            + LOG_NAME
-            + " was found. SSHD logging is disabled");
-      }
-    }
-    async.activateOptions();
+    async = systemLog.createAsyncAppender(LOG_NAME, new SshLogLayout());
   }
 
   @Override
@@ -276,125 +241,38 @@ class SshLog implements LifecycleListener {
     return IdGenerator.format(id);
   }
 
-  private static File resolve(final File logs_dir) {
-    try {
-      return logs_dir.getCanonicalFile();
-    } catch (IOException e) {
-      return logs_dir.getAbsoluteFile();
-    }
-  }
-
-  private static final class DieErrorHandler implements ErrorHandler {
-    @Override
-    public void error(String message, Exception e, int errorCode,
-        LoggingEvent event) {
-      error(e != null ? e.getMessage() : message);
-    }
-
-    @Override
-    public void error(String message, Exception e, int errorCode) {
-      error(e != null ? e.getMessage() : message);
-    }
-
-    @Override
-    public void error(String message) {
-      throw new RuntimeException("Cannot open log file: " + message);
-    }
-
-    @Override
-    public void activateOptions() {
-    }
-
-    @Override
-    public void setAppender(Appender appender) {
-    }
-
-    @Override
-    public void setBackupAppender(Appender appender) {
-    }
-
-    @Override
-    public void setLogger(Logger logger) {
-    }
-  }
-
-  private static final class LogLogHandler implements ErrorHandler {
-    @Override
-    public void error(String message, Exception e, int errorCode,
-        LoggingEvent event) {
-      log.error(message, e);
-    }
-
-    @Override
-    public void error(String message, Exception e, int errorCode) {
-      log.error(message, e);
-    }
-
-    @Override
-    public void error(String message) {
-      log.error(message);
-    }
-
-    @Override
-    public void activateOptions() {
-    }
-
-    @Override
-    public void setAppender(Appender appender) {
-    }
-
-    @Override
-    public void setBackupAppender(Appender appender) {
-    }
-
-    @Override
-    public void setLogger(Logger logger) {
-    }
-  }
-
   void audit(Context ctx, Object result, String cmd) {
-    final String sid = extractSessionId(ctx);
-    final long created = extractCreated(ctx);
-    auditService.dispatch(new SshAuditEvent(sid, extractCurrentUser(ctx), cmd,
-        created, null, result));
+    audit(ctx, result, cmd, null);
   }
 
   void audit(Context ctx, Object result, DispatchCommand cmd) {
-    final String sid = extractSessionId(ctx);
-    final long created = extractCreated(ctx);
-    auditService.dispatch(new SshAuditEvent(sid, extractCurrentUser(ctx),
-        extractWhat(cmd), created, extractParameters(cmd), result));
+    audit(ctx, result, extractWhat(cmd), extractParameters(cmd));
+  }
+
+  private void audit(Context ctx, Object result, String cmd, Multimap<String, ?> params) {
+    String sessionId;
+    CurrentUser currentUser;
+    long created;
+    if (ctx == null) {
+      sessionId = null;
+      currentUser = null;
+      created = TimeUtil.nowMs();
+    } else {
+      SshSession session = ctx.getSession();
+      sessionId = IdGenerator.format(session.getSessionId());
+      currentUser = session.getCurrentUser();
+      created = ctx.created;
+    }
+    auditService.dispatch(new SshAuditEvent(sessionId, currentUser,
+        cmd, created, params, result));
   }
 
   private String extractWhat(DispatchCommand dcmd) {
     String commandName = dcmd.getCommandName();
     String[] args = dcmd.getArguments();
-    if (args.length > 1) {
-      return commandName + "." + args[1];
-    } else {
-      return commandName;
+    for (int i = 1; i < args.length; i++) {
+      commandName = commandName + "." + args[i];
     }
-  }
-
-  private long extractCreated(final Context ctx) {
-    return (ctx != null) ? ctx.created : TimeUtil.nowMs();
-  }
-
-  private CurrentUser extractCurrentUser(final Context ctx) {
-    if (ctx != null) {
-      SshSession session = ctx.getSession();
-      return (session == null) ? null : session.getCurrentUser();
-    } else {
-      return null;
-    }
-  }
-
-  private String extractSessionId(final Context ctx) {
-    if (ctx != null) {
-      SshSession session = ctx.getSession();
-      return (session == null) ? null : IdGenerator.format(session.getSessionId());
-    } else {
-      return null;
-    }
+    return commandName;
   }
 }

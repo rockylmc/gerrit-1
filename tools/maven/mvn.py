@@ -16,9 +16,8 @@
 from __future__ import print_function
 from optparse import OptionParser
 from os import path, environ
-
+from subprocess import check_output
 from sys import stderr
-from tools.util import check_output
 
 opts = OptionParser()
 opts.add_option('--repository', help='maven repository id')
@@ -34,7 +33,7 @@ if not args.v:
   exit(1)
 
 root = path.abspath(__file__)
-for _ in range(0, 3):
+while not path.exists(path.join(root, '.buckconfig')):
   root = path.dirname(root)
 
 if 'install' == args.a:

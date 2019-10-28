@@ -17,18 +17,21 @@ package com.google.gerrit.pgm;
 import static com.google.gerrit.server.schema.DataSourceProvider.Context.MULTI_USER;
 import static com.google.inject.Scopes.SINGLETON;
 
+import com.google.common.cache.Cache;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.gerrit.common.ChangeHooks;
+import com.google.gerrit.common.Die;
 import com.google.gerrit.common.DisabledChangeHooks;
 import com.google.gerrit.extensions.events.GitReferenceUpdatedListener;
 import com.google.gerrit.extensions.events.LifecycleListener;
+import com.google.gerrit.extensions.registration.DynamicMap;
 import com.google.gerrit.extensions.registration.DynamicSet;
 import com.google.gerrit.lifecycle.LifecycleManager;
 import com.google.gerrit.lifecycle.LifecycleModule;
 import com.google.gerrit.lucene.LuceneIndexModule;
-import com.google.gerrit.pgm.util.Die;
 import com.google.gerrit.pgm.util.SiteProgram;
+import com.google.gerrit.reviewdb.client.AccountGroup;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.server.ReviewDb;
@@ -42,7 +45,7 @@ import com.google.gerrit.server.account.GroupCacheImpl;
 import com.google.gerrit.server.account.GroupIncludeCacheImpl;
 import com.google.gerrit.server.cache.CacheRemovalListener;
 import com.google.gerrit.server.cache.h2.DefaultCacheFactory;
-import com.google.gerrit.server.change.ChangeKindCache;
+import com.google.gerrit.server.change.ChangeKindCacheImpl;
 import com.google.gerrit.server.change.MergeabilityChecker;
 import com.google.gerrit.server.change.MergeabilityChecksExecutor;
 import com.google.gerrit.server.change.MergeabilityChecksExecutor.Priority;
@@ -51,6 +54,8 @@ import com.google.gerrit.server.config.CanonicalWebUrl;
 import com.google.gerrit.server.config.CanonicalWebUrlProvider;
 import com.google.gerrit.server.config.FactoryModule;
 import com.google.gerrit.server.config.GerritServerConfig;
+import com.google.gerrit.server.config.GitReceivePackGroups;
+import com.google.gerrit.server.config.GitUploadPackGroups;
 import com.google.gerrit.server.git.GitModule;
 import com.google.gerrit.server.git.MergeUtil;
 import com.google.gerrit.server.git.WorkQueue;
@@ -65,11 +70,13 @@ import com.google.gerrit.server.index.IndexModule;
 import com.google.gerrit.server.index.IndexModule.IndexType;
 import com.google.gerrit.server.mail.ReplacePatchSetSender;
 import com.google.gerrit.server.notedb.NoteDbModule;
+import com.google.gerrit.server.patch.DiffExecutorModule;
 import com.google.gerrit.server.patch.PatchListCacheImpl;
-import com.google.gerrit.server.project.AccessControlModule;
+import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.server.project.CommentLinkInfo;
 import com.google.gerrit.server.project.CommentLinkProvider;
 import com.google.gerrit.server.project.ProjectCacheImpl;
+import com.google.gerrit.server.project.ProjectControl;
 import com.google.gerrit.server.project.ProjectState;
 import com.google.gerrit.server.project.SectionSortCache;
 import com.google.gerrit.server.query.change.ChangeData;
@@ -185,6 +192,7 @@ public class Reindex extends SiteProgram {
 
   private Injector createSysInjector() {
     List<Module> modules = Lists.newArrayList();
+    modules.add(new DiffExecutorModule());
     modules.add(PatchListCacheImpl.module());
     AbstractModule changeIndexModule;
     switch (IndexModule.getIndexType(dbInjector)) {
@@ -207,6 +215,8 @@ public class Reindex extends SiteProgram {
         // once, so don't worry about cache removal.
         bind(new TypeLiteral<DynamicSet<CacheRemovalListener>>() {})
             .toInstance(DynamicSet.<CacheRemovalListener> emptySet());
+        bind(new TypeLiteral<DynamicMap<Cache<?, ?>>>() {})
+            .toInstance(DynamicMap.<Cache<?, ?>> emptyMap());
         bind(new TypeLiteral<List<CommentLinkInfo>>() {})
             .toProvider(CommentLinkProvider.class).in(SINGLETON);
         bind(String.class).annotatedWith(CanonicalWebUrl.class)
@@ -214,7 +224,16 @@ public class Reindex extends SiteProgram {
         bind(IdentifiedUser.class)
           .toProvider(Providers. <IdentifiedUser>of(null));
         bind(CurrentUser.class).to(IdentifiedUser.class);
-        install(new AccessControlModule());
+
+        bind(new TypeLiteral<Set<AccountGroup.UUID>>() {})
+            .annotatedWith(GitUploadPackGroups.class)
+            .toInstance(Collections.<AccountGroup.UUID> emptySet());
+        bind(new TypeLiteral<Set<AccountGroup.UUID>>() {})
+            .annotatedWith(GitReceivePackGroups.class)
+            .toInstance(Collections.<AccountGroup.UUID> emptySet());
+        factory(ChangeControl.AssistedFactory.class);
+        factory(ProjectControl.AssistedFactory.class);
+
         install(new DefaultCacheFactory.Module());
         install(new GroupModule());
         install(new PrologModule());
@@ -224,6 +243,7 @@ public class Reindex extends SiteProgram {
         install(GroupIncludeCacheImpl.module());
         install(ProjectCacheImpl.module());
         install(SectionSortCache.module());
+        install(ChangeKindCacheImpl.module());
         factory(CapabilityControl.Factory.class);
         factory(ChangeData.Factory.class);
         factory(ProjectState.Factory.class);
@@ -256,7 +276,7 @@ public class Reindex extends SiteProgram {
           Key.get(new TypeLiteral<SchemaFactory<ReviewDb>>() {}));
       final List<ReviewDb> dbs = Collections.synchronizedList(
           Lists.<ReviewDb> newArrayListWithCapacity(threads + 1));
-      final ThreadLocal<ReviewDb> localDb = new ThreadLocal<ReviewDb>();
+      final ThreadLocal<ReviewDb> localDb = new ThreadLocal<>();
 
       bind(ReviewDb.class).toProvider(new Provider<ReviewDb>() {
         @Override
@@ -302,9 +322,6 @@ public class Reindex extends SiteProgram {
       DynamicSet.setOf(binder(), GitReferenceUpdatedListener.class);
       DynamicSet.setOf(binder(), CommitValidationListener.class);
       factory(CommitValidators.Factory.class);
-
-      install(ChangeKindCache.module());
-
       install(new GitModule());
       install(new NoteDbModule());
     }

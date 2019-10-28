@@ -29,6 +29,7 @@ import com.google.gwtorm.server.OrmException;
 import com.google.gwtorm.server.ResultSet;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.Repository;
@@ -37,6 +38,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
+@Singleton
 public class DeleteBranch implements RestModifyView<BranchResource, Input>{
   private static final Logger log = LoggerFactory.getLogger(DeleteBranch.class);
 

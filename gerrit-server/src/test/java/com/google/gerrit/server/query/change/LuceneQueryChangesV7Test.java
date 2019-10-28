@@ -32,6 +32,7 @@ import com.google.inject.Injector;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.junit.TestRepository;
 import org.eclipse.jgit.lib.Config;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.List;
@@ -42,6 +43,23 @@ public class LuceneQueryChangesV7Test extends AbstractQueryChangesTest {
     cfg.setInt("index", "lucene", "testVersion", 7);
     return Guice.createInjector(new InMemoryModule(cfg));
   }
+
+  // Tests for features not supported in V7.
+  @Ignore
+  @Override
+  @Test
+  public void byProjectPrefix() {}
+
+  @Ignore
+  @Override
+  @Test
+  public void byDefault() {}
+
+  @Ignore
+  @Override
+  @Test
+  public void bySize() {}
+  // End tests for features not supported in V7.
 
   @Test
   public void pagination() throws Exception {
@@ -141,5 +159,27 @@ public class LuceneQueryChangesV7Test extends AbstractQueryChangesTest {
     // Updated at the same time, 2 > 1.
     assertResultEquals(change2, results.get(0));
     assertResultEquals(change1, results.get(1));
+  }
+
+  @Override
+  @Test
+  public void byTopic() throws Exception {
+    TestRepository<InMemoryRepository> repo = createProject("repo");
+    ChangeInserter ins1 = newChange(repo, null, null, null, null);
+    Change change1 = ins1.getChange();
+    change1.setTopic("feature1");
+    ins1.insert();
+
+    ChangeInserter ins2 = newChange(repo, null, null, null, null);
+    Change change2 = ins2.getChange();
+    change2.setTopic("feature2");
+    ins2.insert();
+
+    newChange(repo, null, null, null, null).insert();
+
+    assertTrue(query("topic:\"\"").isEmpty());
+    assertTrue(query("topic:foo").isEmpty());
+    assertResultEquals(change1, queryOne("topic:feature1"));
+    assertResultEquals(change2, queryOne("topic:feature2"));
   }
 }

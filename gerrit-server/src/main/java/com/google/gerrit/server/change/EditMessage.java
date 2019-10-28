@@ -30,8 +30,10 @@ import com.google.gerrit.server.change.EditMessage.Input;
 import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
 import com.google.gerrit.server.project.InvalidChangeOperationException;
 import com.google.gerrit.server.project.NoSuchChangeException;
+import com.google.gerrit.server.util.TimeUtil;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.errors.IncorrectObjectTypeException;
 import org.eclipse.jgit.errors.MissingObjectException;
@@ -39,6 +41,7 @@ import org.eclipse.jgit.lib.PersonIdent;
 
 import java.io.IOException;
 
+@Singleton
 class EditMessage implements RestModifyView<RevisionResource, Input>,
     UiAction<RevisionResource> {
   private final ChangeUtil changeUtil;
@@ -76,7 +79,7 @@ class EditMessage implements RestModifyView<RevisionResource, Input>,
           rsrc.getControl(),
           rsrc.getPatchSet().getId(),
           input.message,
-          myIdent));
+          new PersonIdent(myIdent, TimeUtil.nowTs())));
     } catch (InvalidChangeOperationException e) {
       throw new BadRequestException(e.getMessage());
     } catch (NoSuchChangeException e) {

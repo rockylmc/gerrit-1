@@ -14,7 +14,7 @@
 
 package com.google.gerrit.pgm.init;
 
-import static com.google.gerrit.pgm.init.InitUtil.chmod;
+import static com.google.gerrit.common.FileUtil.chmod;
 import static com.google.gerrit.pgm.init.InitUtil.die;
 import static com.google.gerrit.pgm.init.InitUtil.extract;
 import static com.google.gerrit.pgm.init.InitUtil.mkdir;
@@ -126,7 +126,7 @@ public class SitePathInitializer {
   }
 
   private static List<InitStep> stepsOf(final Injector injector) {
-    final ArrayList<InitStep> r = new ArrayList<InitStep>();
+    final ArrayList<InitStep> r = new ArrayList<>();
     for (Binding<InitStep> b : all(injector)) {
       r.add(b.getProvider().get());
     }

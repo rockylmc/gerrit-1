@@ -19,13 +19,13 @@ import static com.google.inject.Stage.PRODUCTION;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
+import com.google.gerrit.common.Die;
 import com.google.gerrit.pgm.init.InitFlags;
 import com.google.gerrit.pgm.init.InitModule;
 import com.google.gerrit.pgm.init.InstallPlugins;
 import com.google.gerrit.pgm.init.PluginsDistribution;
 import com.google.gerrit.pgm.init.SitePathInitializer;
 import com.google.gerrit.pgm.util.ConsoleUI;
-import com.google.gerrit.pgm.util.Die;
 import com.google.gerrit.pgm.util.SiteProgram;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.config.SitePath;
@@ -187,7 +187,7 @@ public class BaseInit extends SiteProgram {
   private SiteInit createSiteInit() {
     final ConsoleUI ui = getConsoleUI();
     final File sitePath = getSitePath();
-    final List<Module> m = new ArrayList<Module>();
+    final List<Module> m = new ArrayList<>();
 
     m.add(new InitModule(standalone, initDb));
     m.add(new AbstractModule() {
@@ -252,7 +252,7 @@ public class BaseInit extends SiteProgram {
     }
 
     void upgradeSchema() throws OrmException {
-      final List<String> pruneList = new ArrayList<String>();
+      final List<String> pruneList = new ArrayList<>();
       schemaUpdater.update(new UpdateUI() {
         @Override
         public void message(String msg) {

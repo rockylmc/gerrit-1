@@ -15,6 +15,7 @@
 package com.google.gerrit.client.admin;
 
 import com.google.gerrit.client.Gerrit;
+import com.google.gerrit.client.StringListPanel;
 import com.google.gerrit.client.access.AccessMap;
 import com.google.gerrit.client.access.ProjectAccessInfo;
 import com.google.gerrit.client.actions.ActionButton;
@@ -34,10 +35,11 @@ import com.google.gerrit.client.rpc.ScreenLoadCallback;
 import com.google.gerrit.client.ui.NpIntTextBox;
 import com.google.gerrit.client.ui.OnEditEnabler;
 import com.google.gerrit.client.ui.SmallHeading;
+import com.google.gerrit.extensions.api.projects.ProjectState;
+import com.google.gerrit.extensions.common.InheritableBoolean;
+import com.google.gerrit.extensions.common.SubmitType;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.DownloadCommand;
 import com.google.gerrit.reviewdb.client.Project;
-import com.google.gerrit.reviewdb.client.Project.InheritableBoolean;
-import com.google.gerrit.reviewdb.client.Project.SubmitType;
 import com.google.gwt.event.dom.client.ChangeEvent;
 import com.google.gwt.event.dom.client.ChangeHandler;
 import com.google.gwt.event.dom.client.ClickEvent;
@@ -46,7 +48,7 @@ import com.google.gwt.user.client.ui.Button;
 import com.google.gwt.user.client.ui.CheckBox;
 import com.google.gwt.user.client.ui.FlexTable;
 import com.google.gwt.user.client.ui.FlowPanel;
-import com.google.gwt.user.client.ui.FocusWidget;
+import com.google.gwt.user.client.ui.HasEnabled;
 import com.google.gwt.user.client.ui.HorizontalPanel;
 import com.google.gwt.user.client.ui.Image;
 import com.google.gwt.user.client.ui.Label;
@@ -58,7 +60,10 @@ import com.google.gwt.user.client.ui.Widget;
 import com.google.gwtexpui.globalkey.client.NpTextArea;
 import com.google.gwtexpui.globalkey.client.NpTextBox;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -76,7 +81,7 @@ public class ProjectInfoScreen extends ProjectScreen {
   private ListBox contentMerge;
   private NpTextBox maxObjectSizeLimit;
   private Label effectiveMaxObjectSizeLimit;
-  private Map<String, Map<String, FocusWidget>> pluginConfigWidgets;
+  private Map<String, Map<String, HasEnabled>> pluginConfigWidgets;
 
   // Section: Contributor Agreements
   private ListBox contributorAgreements;
@@ -149,9 +154,9 @@ public class ProjectInfoScreen extends ProjectScreen {
   }
 
   private void enableForm(boolean isOwner) {
-    submitType.setEnabled(isOwner);
     state.setEnabled(isOwner);
-    contentMerge.setEnabled(isOwner);
+    submitType.setEnabled(isOwner);
+    setEnabledForUseContentMerge();
     descTxt.setEnabled(isOwner);
     contributorAgreements.setEnabled(isOwner);
     signedOffBy.setEnabled(isOwner);
@@ -159,8 +164,8 @@ public class ProjectInfoScreen extends ProjectScreen {
     maxObjectSizeLimit.setEnabled(isOwner);
 
     if (pluginConfigWidgets != null) {
-      for (Map<String, FocusWidget> widgetMap : pluginConfigWidgets.values()) {
-        for (FocusWidget widget : widgetMap.values()) {
+      for (Map<String, HasEnabled> widgetMap : pluginConfigWidgets.values()) {
+        for (HasEnabled widget : widgetMap.values()) {
           widget.setEnabled(isOwner);
         }
       }
@@ -185,14 +190,14 @@ public class ProjectInfoScreen extends ProjectScreen {
     grid.addHeader(new SmallHeading(Util.C.headingProjectOptions()));
 
     state = new ListBox();
-    for (final Project.State stateValue : Project.State.values()) {
+    for (ProjectState stateValue : ProjectState.values()) {
       state.addItem(Util.toLongString(stateValue), stateValue.name());
     }
     saveEnabler.listenTo(state);
     grid.add(Util.C.headingProjectState(), state);
 
     submitType = new ListBox();
-    for (final Project.SubmitType type : Project.SubmitType.values()) {
+    for (final SubmitType type : SubmitType.values()) {
       submitType.addItem(Util.toLongString(type), type.name());
     }
     submitType.addChangeHandler(new ChangeHandler() {
@@ -238,7 +243,7 @@ public class ProjectInfoScreen extends ProjectScreen {
    * content merge the useContentMerge checkbox gets disabled.
    */
   private void setEnabledForUseContentMerge() {
-    if (SubmitType.FAST_FORWARD_ONLY.equals(Project.SubmitType
+    if (SubmitType.FAST_FORWARD_ONLY.equals(SubmitType
         .valueOf(submitType.getValue(submitType.getSelectedIndex())))) {
       contentMerge.setEnabled(false);
       InheritedBooleanInfo b = InheritedBooleanInfo.create();
@@ -263,7 +268,7 @@ public class ProjectInfoScreen extends ProjectScreen {
     grid.addHtml(Util.C.useSignedOffBy(), signedOffBy);
   }
 
-  private void setSubmitType(final Project.SubmitType newSubmitType) {
+  private void setSubmitType(final SubmitType newSubmitType) {
     int index = -1;
     if (submitType != null) {
       for (int i = 0; i < submitType.getItemCount(); i++) {
@@ -277,7 +282,7 @@ public class ProjectInfoScreen extends ProjectScreen {
     }
   }
 
-  private void setState(final Project.State newState) {
+  private void setState(final ProjectState newState) {
     if (state != null) {
       for (int i = 0; i < state.getItemCount(); i++) {
         if (newState.name().equals(state.getValue(i))) {
@@ -357,7 +362,7 @@ public class ProjectInfoScreen extends ProjectScreen {
     pluginConfigWidgets = new HashMap<>();
 
     for (String pluginName : info.pluginConfig().keySet()) {
-      Map<String, FocusWidget> widgetMap = new HashMap<>();
+      Map<String, HasEnabled> widgetMap = new HashMap<>();
       pluginConfigWidgets.put(pluginName, widgetMap);
       LabeledWidgetsGrid g = new LabeledWidgetsGrid();
       g.addHeader(new SmallHeading(Util.M.pluginProjectOptionsTitle(pluginName)));
@@ -366,7 +371,7 @@ public class ProjectInfoScreen extends ProjectScreen {
           info.pluginConfig(pluginName);
       pluginConfig.copyKeysIntoChildren("name");
       for (ConfigParameterInfo param : Natives.asList(pluginConfig.values())) {
-        FocusWidget w;
+        HasEnabled w;
         switch (param.type()) {
           case "STRING":
           case "INT":
@@ -380,7 +385,7 @@ public class ProjectInfoScreen extends ProjectScreen {
             w = renderListBox(g, param);
             break;
           case "ARRAY":
-            w = renderTextArea(g, param);
+            w = renderStringListPanel(g, param);
             break;
           default:
             throw new UnsupportedOperationException("unsupported widget type");
@@ -497,24 +502,21 @@ public class ProjectInfoScreen extends ProjectScreen {
     return listBox;
   }
 
-  private NpTextArea renderTextArea(LabeledWidgetsGrid g,
+  private StringListPanel renderStringListPanel(LabeledWidgetsGrid g,
       ConfigParameterInfo param) {
-    NpTextArea txtArea = new NpTextArea();
-    txtArea.setVisibleLines(4);
-    txtArea.setCharacterWidth(40);
-    StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < param.values().length(); i++) {
-      String v = param.values().get(i);
-      sb.append(v).append("\n");
+    StringListPanel p =
+        new StringListPanel(null, Arrays.asList(getDisplayName(param)),
+            saveProject, false);
+    List<List<String>> values = new ArrayList<>();
+    for (String v : Natives.asList(param.values())) {
+      values.add(Arrays.asList(v));
     }
-    txtArea.setText(sb.toString());
-    if (param.editable()) {
-      saveEnabler.listenTo(txtArea);
-    } else {
-      txtArea.setEnabled(false);
+    p.display(values);
+    if (!param.editable()) {
+      p.setEnabled(false);
     }
-    addWidget(g, txtArea, param);
-    return txtArea;
+    addWidget(g, p, param);
+    return p;
   }
 
   private void addWidget(LabeledWidgetsGrid g, Widget w, ConfigParameterInfo param) {
@@ -569,8 +571,8 @@ public class ProjectInfoScreen extends ProjectScreen {
         getBool(contributorAgreements), getBool(contentMerge),
         getBool(signedOffBy), getBool(requireChangeID),
         maxObjectSizeLimit.getText().trim(),
-        Project.SubmitType.valueOf(submitType.getValue(submitType.getSelectedIndex())),
-        Project.State.valueOf(state.getValue(state.getSelectedIndex())),
+        SubmitType.valueOf(submitType.getValue(submitType.getSelectedIndex())),
+        ProjectState.valueOf(state.getValue(state.getSelectedIndex())),
         getPluginConfigValues(), new GerritCallback<ConfigInfo>() {
           @Override
           public void onSuccess(ConfigInfo result) {
@@ -589,11 +591,11 @@ public class ProjectInfoScreen extends ProjectScreen {
   private Map<String, Map<String, ConfigParameterValue>> getPluginConfigValues() {
     Map<String, Map<String, ConfigParameterValue>> pluginConfigValues =
         new HashMap<>(pluginConfigWidgets.size());
-    for (Entry<String, Map<String, FocusWidget>> e : pluginConfigWidgets.entrySet()) {
+    for (Entry<String, Map<String, HasEnabled>> e : pluginConfigWidgets.entrySet()) {
       Map<String, ConfigParameterValue> values = new HashMap<>(e.getValue().size());
       pluginConfigValues.put(e.getKey(), values);
-      for (Entry<String, FocusWidget> e2 : e.getValue().entrySet()) {
-        FocusWidget widget = e2.getValue();
+      for (Entry<String, HasEnabled> e2 : e.getValue().entrySet()) {
+        HasEnabled widget = e2.getValue();
         if (widget instanceof TextBox) {
           values.put(e2.getKey(), ConfigParameterValue.create()
               .value(((TextBox) widget).getValue().trim()));
@@ -608,10 +610,11 @@ public class ProjectInfoScreen extends ProjectScreen {
               ? listBox.getValue(listBox.getSelectedIndex()) : null;
           values.put(e2.getKey(), ConfigParameterValue.create()
               .value(value));
-        } else if (widget instanceof NpTextArea) {
-          String text = ((NpTextArea) widget).getText().trim();
-          values.put(e2.getKey(), ConfigParameterValue.create()
-              .values(text.split("\n")));
+        } else if (widget instanceof StringListPanel) {
+          values.put(e2.getKey(),
+              ConfigParameterValue.create().values(
+                  ((StringListPanel) widget).getValues(0)
+                      .toArray(new String[] {})));
         } else {
           throw new UnsupportedOperationException("unsupported widget type");
         }

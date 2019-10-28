@@ -31,23 +31,25 @@ import com.google.gerrit.server.group.PutOwner.Input;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.util.Collections;
 
+@Singleton
 public class PutOwner implements RestModifyView<GroupResource, Input> {
   public static class Input {
     @DefaultInput
     public String owner;
   }
 
-  private final Provider<GroupsCollection> groupsCollection;
+  private final GroupsCollection groupsCollection;
   private final GroupCache groupCache;
-  private final ReviewDb db;
+  private final Provider<ReviewDb> db;
   private final GroupJson json;
 
   @Inject
-  PutOwner(Provider<GroupsCollection> groupsCollection, GroupCache groupCache,
-      ReviewDb db, GroupJson json) {
+  PutOwner(GroupsCollection groupsCollection, GroupCache groupCache,
+      Provider<ReviewDb> db, GroupJson json) {
     this.groupsCollection = groupsCollection;
     this.groupCache = groupCache;
     this.db = db;
@@ -70,15 +72,15 @@ public class PutOwner implements RestModifyView<GroupResource, Input> {
       throw new BadRequestException("owner is required");
     }
 
-    group = db.accountGroups().get(group.getId());
+    group = db.get().accountGroups().get(group.getId());
     if (group == null) {
       throw new ResourceNotFoundException();
     }
 
-    GroupDescription.Basic owner = groupsCollection.get().parse(input.owner);
+    GroupDescription.Basic owner = groupsCollection.parse(input.owner);
     if (!group.getOwnerGroupUUID().equals(owner.getGroupUUID())) {
       group.setOwnerGroupUUID(owner.getGroupUUID());
-      db.accountGroups().update(Collections.singleton(group));
+      db.get().accountGroups().update(Collections.singleton(group));
       groupCache.evict(group);
     }
     return json.format(owner);

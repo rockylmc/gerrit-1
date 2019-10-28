@@ -62,10 +62,11 @@ public class CommentSender extends ReplyToChangeSender {
     this.notify = notify;
   }
 
-  public void setPatchLineComments(final List<PatchLineComment> plc) {
+  public void setPatchLineComments(final List<PatchLineComment> plc)
+      throws OrmException {
     inlineComments = plc;
 
-    Set<String> paths = new HashSet<String>();
+    Set<String> paths = new HashSet<>();
     for (PatchLineComment c : plc) {
       Patch.Key p = c.getKey().getParentKey();
       if (!Patch.COMMIT_MSG.equals(p.getFileName())) {

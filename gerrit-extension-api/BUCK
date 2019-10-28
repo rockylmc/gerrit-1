@@ -4,10 +4,13 @@ SRCS = glob([SRC + '**/*.java'])
 gwt_module(
   name = 'client',
   srcs = glob([
+    SRC + 'api/projects/ProjectState.java',
+    SRC + 'common/InheritableBoolean.java',
+    SRC + 'common/ListChangesOption.java',
+    SRC + 'common/SubmitType.java',
     SRC + 'webui/GerritTopMenu.java',
-    SRC + 'common/ListChangesOption.java'
   ]),
-  gwtxml = SRC + 'Extensions.gwt.xml',
+  gwt_xml = SRC + 'Extensions.gwt.xml',
   visibility = ['PUBLIC'],
 )
 
@@ -28,10 +31,10 @@ java_library(
   visibility = ['PUBLIC'],
 )
 
-java_library2(
+java_library(
   name = 'api',
   srcs = glob([SRC + '**/*.java']),
-  compile_deps = ['//lib/guice:guice'],
+  provided_deps = ['//lib/guice:guice'],
   visibility = ['PUBLIC'],
 )
 
@@ -45,7 +48,7 @@ java_doc(
   name = 'extension-api-javadoc',
   title = 'Gerrit Review Extension API Documentation',
   pkg = 'com.google.gerrit.extensions',
-  paths = ['$SRCDIR/src/main/java'],
+  paths = ['src/main/java'],
   srcs = SRCS,
   deps = [
     '//lib/guice:javax-inject',

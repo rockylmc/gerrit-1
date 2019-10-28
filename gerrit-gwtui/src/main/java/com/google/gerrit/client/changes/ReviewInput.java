@@ -61,11 +61,18 @@ public class ReviewInput extends JavaScriptObject {
         var l=m[p];
         for (var i=0;i<l.length;i++) {
           var c=l[i];
-          delete c['kind'];
           delete c['path'];
           delete c['updated'];
         }
       }
+    }
+  }-*/;
+
+  public final native void mergeLabels(ReviewInput o) /*-{
+    var l=o.labels;
+    if (l) {
+      for (var n in l)
+        this.labels[n]=l[n];
     }
   }-*/;
 

@@ -38,6 +38,7 @@ import com.google.gerrit.server.project.ProjectState;
 import com.google.gerrit.server.query.change.ChangeData;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
@@ -56,6 +57,7 @@ import java.util.TreeMap;
  * database at submit time, or refreshed on demand, as when reading approvals
  * from the notedb.
  */
+@Singleton
 public class ApprovalCopier {
   private final GitRepositoryManager repoManager;
   private final ProjectCache projectCache;
@@ -79,6 +81,11 @@ public class ApprovalCopier {
   public void copy(ReviewDb db, ChangeControl ctl, PatchSet ps)
       throws OrmException {
     db.patchSetApprovals().insert(getForPatchSet(db, ctl, ps));
+  }
+
+  Iterable<PatchSetApproval> getForPatchSet(ReviewDb db,
+      ChangeControl ctl, PatchSet.Id psId) throws OrmException {
+    return getForPatchSet(db, ctl, db.patchSets().get(psId));
   }
 
   private Iterable<PatchSetApproval> getForPatchSet(ReviewDb db,

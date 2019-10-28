@@ -14,13 +14,16 @@
 
 package com.google.gerrit.server.account;
 
+import com.google.common.base.Strings;
 import com.google.gerrit.extensions.restapi.AuthException;
 import com.google.gerrit.extensions.restapi.ResourceNotFoundException;
 import com.google.gerrit.extensions.restapi.RestReadView;
+import com.google.gerrit.extensions.webui.TopMenu;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.ChangeScreen;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.CommentVisibilityStrategy;
+import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.ReviewCategoryStrategy;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.DateFormat;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.DiffView;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.DownloadCommand;
@@ -28,23 +31,54 @@ import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.DownloadSchem
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.TimeFormat;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.CurrentUser;
+import com.google.gerrit.server.config.AllUsersName;
+import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
+import org.eclipse.jgit.errors.ConfigInvalidException;
+import org.eclipse.jgit.lib.Config;
+import org.eclipse.jgit.lib.Repository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+@Singleton
 public class GetPreferences implements RestReadView<AccountResource> {
+  private static final Logger log = LoggerFactory.getLogger(GetPreferences.class);
+
+  public static final String MY = "my";
+  public static final String KEY_URL = "url";
+  public static final String KEY_TARGET = "target";
+  public static final String KEY_ID = "id";
+
   private final Provider<CurrentUser> self;
   private final Provider<ReviewDb> db;
+  private final AllUsersName allUsersName;
+  private final GitRepositoryManager gitMgr;
 
   @Inject
-  GetPreferences(Provider<CurrentUser> self, Provider<ReviewDb> db) {
+  GetPreferences(Provider<CurrentUser> self, Provider<ReviewDb> db,
+      AllUsersName allUsersName,
+      GitRepositoryManager gitMgr) {
     this.self = self;
     this.db = db;
+    this.allUsersName = allUsersName;
+    this.gitMgr = gitMgr;
   }
 
   @Override
   public PreferenceInfo apply(AccountResource rsrc)
-      throws AuthException, ResourceNotFoundException, OrmException {
+      throws AuthException,
+      ResourceNotFoundException,
+      OrmException,
+      IOException,
+      ConfigInvalidException {
     if (self.get() != rsrc.getUser()
         && !self.get().getCapabilities().canAdministrateServer()) {
       throw new AuthException("restricted to administrator");
@@ -53,13 +87,20 @@ public class GetPreferences implements RestReadView<AccountResource> {
     if (a == null) {
       throw new ResourceNotFoundException();
     }
-    return new PreferenceInfo(a.getGeneralPreferences());
+
+    Repository git = gitMgr.openRepository(allUsersName);
+    try {
+      VersionedAccountPreferences p =
+          VersionedAccountPreferences.forUser(rsrc.getUser().getAccountId());
+      p.load(git);
+      return new PreferenceInfo(a.getGeneralPreferences(), p, git);
+    } finally {
+      git.close();
+    }
   }
 
-  static class PreferenceInfo {
-    final String kind = "gerritcodereview#preferences";
-
-    short changesPerPage;
+  public static class PreferenceInfo {
+    Short changesPerPage;
     Boolean showSiteHeader;
     Boolean useFlashClipboard;
     DownloadScheme downloadScheme;
@@ -68,29 +109,79 @@ public class GetPreferences implements RestReadView<AccountResource> {
     DateFormat dateFormat;
     TimeFormat timeFormat;
     Boolean reversePatchSetOrder;
-    Boolean showUsernameInReviewCategory;
     Boolean relativeDateInChangeTable;
     Boolean sizeBarInChangeTable;
+    Boolean legacycidInChangeTable;
+    ReviewCategoryStrategy reviewCategoryStrategy;
     CommentVisibilityStrategy commentVisibilityStrategy;
     DiffView diffView;
     ChangeScreen changeScreen;
+    List<TopMenu.MenuItem> my;
 
-    PreferenceInfo(AccountGeneralPreferences p) {
-      changesPerPage = p.getMaximumPageSize();
-      showSiteHeader = p.isShowSiteHeader() ? true : null;
-      useFlashClipboard = p.isUseFlashClipboard() ? true : null;
-      downloadScheme = p.getDownloadUrl();
-      downloadCommand = p.getDownloadCommand();
-      copySelfOnEmail = p.isCopySelfOnEmails() ? true : null;
-      dateFormat = p.getDateFormat();
-      timeFormat = p.getTimeFormat();
-      reversePatchSetOrder = p.isReversePatchSetOrder() ? true : null;
-      showUsernameInReviewCategory = p.isShowUsernameInReviewCategory() ? true : null;
-      relativeDateInChangeTable = p.isRelativeDateInChangeTable() ? true : null;
-      sizeBarInChangeTable = p.isSizeBarInChangeTable() ? true : null;
-      commentVisibilityStrategy = p.getCommentVisibilityStrategy();
-      diffView = p.getDiffView();
-      changeScreen = p.getChangeScreen();
+    public PreferenceInfo(AccountGeneralPreferences p,
+        VersionedAccountPreferences v, Repository allUsers) {
+      if (p != null) {
+        changesPerPage = p.getMaximumPageSize();
+        showSiteHeader = p.isShowSiteHeader() ? true : null;
+        useFlashClipboard = p.isUseFlashClipboard() ? true : null;
+        downloadScheme = p.getDownloadUrl();
+        downloadCommand = p.getDownloadCommand();
+        copySelfOnEmail = p.isCopySelfOnEmails() ? true : null;
+        dateFormat = p.getDateFormat();
+        timeFormat = p.getTimeFormat();
+        reversePatchSetOrder = p.isReversePatchSetOrder() ? true : null;
+        relativeDateInChangeTable = p.isRelativeDateInChangeTable() ? true : null;
+        sizeBarInChangeTable = p.isSizeBarInChangeTable() ? true : null;
+        legacycidInChangeTable = p.isLegacycidInChangeTable() ? true : null;
+        reviewCategoryStrategy = p.getReviewCategoryStrategy();
+        commentVisibilityStrategy = p.getCommentVisibilityStrategy();
+        diffView = p.getDiffView();
+        changeScreen = p.getChangeScreen();
+      }
+      my = my(v, allUsers);
+    }
+
+    private List<TopMenu.MenuItem> my(VersionedAccountPreferences v,
+        Repository allUsers) {
+      List<TopMenu.MenuItem> my = my(v);
+      if (my.isEmpty() && !v.isDefaults()) {
+        try {
+          VersionedAccountPreferences d = VersionedAccountPreferences.forDefault();
+          d.load(allUsers);
+          my = my(d);
+        } catch (ConfigInvalidException | IOException e) {
+          log.warn("cannot read default preferences", e);
+        }
+      }
+      if (my.isEmpty()) {
+        my.add(new TopMenu.MenuItem("Changes", "#/dashboard/self", null));
+        my.add(new TopMenu.MenuItem("Drafts", "#/q/is:draft", null));
+        my.add(new TopMenu.MenuItem("Draft Comments", "#/q/has:draft", null));
+        my.add(new TopMenu.MenuItem("Watched Changes", "#/q/is:watched+is:open", null));
+        my.add(new TopMenu.MenuItem("Starred Changes", "#/q/is:starred", null));
+        my.add(new TopMenu.MenuItem("Groups", "#/groups/self", null));
+      }
+      return my;
+    }
+
+    private List<TopMenu.MenuItem> my(VersionedAccountPreferences v) {
+      List<TopMenu.MenuItem> my = new ArrayList<>();
+      Config cfg = v.getConfig();
+      for (String subsection : cfg.getSubsections(MY)) {
+        String url = my(cfg, subsection, KEY_URL, "#/");
+        String target = my(cfg, subsection, KEY_TARGET,
+            url.startsWith("#") ? null : "_blank");
+        my.add(new TopMenu.MenuItem(
+            subsection, url, target,
+            my(cfg, subsection, KEY_ID, null)));
+      }
+      return my;
+    }
+
+    private static String my(Config cfg, String subsection, String key,
+        String defaultValue) {
+      String val = cfg.getString(MY, subsection, key);
+      return !Strings.isNullOrEmpty(val) ? val : defaultValue;
     }
   }
 }

@@ -25,6 +25,7 @@ import com.google.common.html.HtmlEscapers;
 import com.google.common.io.ByteStreams;
 import com.google.gerrit.extensions.events.LifecycleListener;
 import com.google.gerrit.launcher.GerritLauncher;
+import com.google.gerrit.pgm.http.jetty.HttpLog.HttpLogFactory;
 import com.google.gerrit.reviewdb.client.AuthType;
 import com.google.gerrit.server.config.ConfigUtil;
 import com.google.gerrit.server.config.GerritServerConfig;
@@ -39,6 +40,7 @@ import com.google.inject.servlet.GuiceFilter;
 import com.google.inject.servlet.GuiceServletContextListener;
 
 import org.eclipse.jetty.http.HttpScheme;
+import org.eclipse.jetty.jmx.MBeanContainer;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.ForwardedRequestCustomizer;
 import org.eclipse.jetty.server.Handler;
@@ -58,6 +60,7 @@ import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.BlockingArrayQueue;
+import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.resource.Resource;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
@@ -75,6 +78,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -157,7 +161,7 @@ public class JettyServer {
 
   @Inject
   JettyServer(@GerritServerConfig final Config cfg, final SitePaths site,
-      final JettyEnv env)
+      final JettyEnv env, final HttpLogFactory httpLogFactory)
       throws MalformedURLException, IOException {
     this.site = site;
 
@@ -167,9 +171,16 @@ public class JettyServer {
     Handler app = makeContext(env, cfg);
     if (cfg.getBoolean("httpd", "requestLog", !reverseProxy)) {
       RequestLogHandler handler = new RequestLogHandler();
-      handler.setRequestLog(new HttpLog(site, cfg));
+      handler.setRequestLog(httpLogFactory.get());
       handler.setHandler(app);
       app = handler;
+    }
+    if (cfg.getBoolean("httpd", "registerMBeans", false)) {
+      MBeanContainer mbean =
+          new MBeanContainer(ManagementFactory.getPlatformMBeanServer());
+      httpd.addEventListener(mbean);
+      httpd.addBean(Log.getRootLogger());
+      httpd.addBean(mbean);
     }
 
     httpd.setHandler(app);
@@ -361,7 +372,7 @@ public class JettyServer {
 
   private Handler makeContext(final JettyEnv env, final Config cfg)
       throws MalformedURLException, IOException {
-    final Set<String> paths = new HashSet<String>();
+    final Set<String> paths = new HashSet<>();
     for (URI u : listenURLs(cfg)) {
       String p = u.getPath();
       if (p == null || p.isEmpty()) {
@@ -373,7 +384,7 @@ public class JettyServer {
       paths.add(p);
     }
 
-    final List<ContextHandler> all = new ArrayList<ContextHandler>();
+    final List<ContextHandler> all = new ArrayList<>();
     for (String path : paths) {
       all.add(makeContext(path, env, cfg));
     }
@@ -578,7 +589,13 @@ public class JettyServer {
         String pkg = "gerrit-gwtui";
         String target = "ui_" + rule.select((HttpServletRequest) request);
         String rule = "//" + pkg + ":" + target;
-        File zip = new File(new File(gen, pkg), target + ".zip");
+        // TODO(davido): instead of assuming specific Buck's internal
+        // target directory for gwt_binary() artifacts, ask Buck for
+        // the location of user agent permutation GWT zip, e. g.:
+        // $ buck targets --show_output //gerrit-gwtui:ui_safari \
+        //    | awk '{print $2}'
+        String child = String.format("%s/__gwt_binary_%s__", pkg, target);
+        File zip = new File(new File(gen, child), target + ".zip");
 
         synchronized (this) {
           try {

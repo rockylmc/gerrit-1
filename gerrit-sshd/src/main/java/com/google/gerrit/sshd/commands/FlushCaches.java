@@ -14,32 +14,34 @@
 
 package com.google.gerrit.sshd.commands;
 
+import static com.google.gerrit.server.config.PostCaches.Operation.FLUSH;
+import static com.google.gerrit.server.config.PostCaches.Operation.FLUSH_ALL;
 import static com.google.gerrit.sshd.CommandMetaData.Mode.MASTER_OR_SLAVE;
 
-import com.google.common.cache.Cache;
 import com.google.gerrit.common.data.GlobalCapability;
 import com.google.gerrit.extensions.annotations.RequiresCapability;
-import com.google.gerrit.extensions.registration.DynamicMap;
-import com.google.gerrit.server.IdentifiedUser;
-import com.google.gerrit.sshd.BaseCommand;
+import com.google.gerrit.extensions.restapi.RestApiException;
+import com.google.gerrit.server.config.ConfigResource;
+import com.google.gerrit.server.config.ListCaches;
+import com.google.gerrit.server.config.ListCaches.OutputFormat;
+import com.google.gerrit.server.config.PostCaches;
 import com.google.gerrit.sshd.CommandMetaData;
+import com.google.gerrit.sshd.SshCommand;
 import com.google.inject.Inject;
+import com.google.inject.Provider;
 
 import org.kohsuke.args4j.Option;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.SortedSet;
 
 /** Causes the caches to purge all entries and reload. */
 @RequiresCapability(GlobalCapability.FLUSH_CACHES)
 @CommandMetaData(name = "flush-caches", description = "Flush some/all server caches from memory",
   runsAt = MASTER_OR_SLAVE)
-final class FlushCaches extends CacheCommand {
-  private static final String WEB_SESSIONS = "web_sessions";
-
+final class FlushCaches extends SshCommand {
   @Option(name = "--cache", usage = "flush named cache", metaVar = "NAME")
-  private List<String> caches = new ArrayList<String>();
+  private List<String> caches = new ArrayList<>();
 
   @Option(name = "--all", usage = "flush all caches")
   private boolean all;
@@ -48,85 +50,54 @@ final class FlushCaches extends CacheCommand {
   private boolean list;
 
   @Inject
-  IdentifiedUser currentUser;
+  private Provider<ListCaches> listCaches;
+
+  @Inject
+  private PostCaches postCaches;
 
   @Override
   protected void run() throws Failure {
-    if (caches.contains(WEB_SESSIONS)
-        && !currentUser.getCapabilities().canAdministrateServer()) {
-      String msg = String.format(
-          "fatal: only site administrators can flush %s",
-          WEB_SESSIONS);
-      throw new UnloggedFailure(BaseCommand.STATUS_NOT_ADMIN, msg);
-    }
-
-    if (list) {
-      if (all || caches.size() > 0) {
-        throw error("error: cannot use --list with --all or --cache");
+    try {
+      if (list) {
+        if (all || caches.size() > 0) {
+          throw error("error: cannot use --list with --all or --cache");
+        }
+        doList();
+        return;
       }
-      doList();
-      return;
-    }
 
-    if (all && caches.size() > 0) {
-      throw error("error: cannot combine --all and --cache");
-    } else if (!all && caches.size() == 1 && caches.contains("all")) {
-      caches.clear();
-      all = true;
-    } else if (!all && caches.isEmpty()) {
-      all = true;
-    }
-
-    final SortedSet<String> names = cacheNames();
-    for (final String n : caches) {
-      if (!names.contains(n)) {
-        throw error("error: cache \"" + n + "\" not recognized");
+      if (all && caches.size() > 0) {
+        throw error("error: cannot combine --all and --cache");
+      } else if (!all && caches.size() == 1 && caches.contains("all")) {
+        caches.clear();
+        all = true;
+      } else if (!all && caches.isEmpty()) {
+        all = true;
       }
+
+      if (all) {
+        postCaches.apply(new ConfigResource(),
+            new PostCaches.Input(FLUSH_ALL));
+      } else {
+        postCaches.apply(new ConfigResource(),
+            new PostCaches.Input(FLUSH, caches));
+      }
+    } catch (RestApiException e) {
+      throw die(e.getMessage());
     }
-    doBulkFlush();
   }
 
-  private static UnloggedFailure error(final String msg) {
+  private static UnloggedFailure error(String msg) {
     return new UnloggedFailure(1, msg);
   }
 
+  @SuppressWarnings("unchecked")
   private void doList() {
-    for (final String name : cacheNames()) {
+    for (String name : (List<String>) listCaches.get()
+        .setFormat(OutputFormat.LIST).apply(new ConfigResource())) {
       stderr.print(name);
       stderr.print('\n');
     }
     stderr.flush();
-  }
-
-  private void doBulkFlush() {
-    try {
-      for (DynamicMap.Entry<Cache<?, ?>> e : cacheMap) {
-        String n = cacheNameOf(e.getPluginName(), e.getExportName());
-        if (flush(n)) {
-          try {
-            e.getProvider().get().invalidateAll();
-          } catch (Throwable err) {
-            stderr.println("error: cannot flush cache \"" + n + "\": " + err);
-          }
-        }
-      }
-    } finally {
-      stderr.flush();
-    }
-  }
-
-  private boolean flush(final String cacheName) {
-    if (caches.contains(cacheName)) {
-      return true;
-
-    } else if (all) {
-      if (WEB_SESSIONS.equals(cacheName)) {
-        return false;
-      }
-      return true;
-
-    } else {
-      return false;
-    }
   }
 }

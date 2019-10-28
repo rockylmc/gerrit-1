@@ -16,6 +16,7 @@ package com.google.gerrit.server.config;
 
 import static com.google.gerrit.server.config.CapabilityResource.CAPABILITY_KIND;
 import static com.google.gerrit.server.config.ConfigResource.CONFIG_KIND;
+import static com.google.gerrit.server.config.TaskResource.TASK_KIND;
 import static com.google.gerrit.server.config.TopMenuResource.TOP_MENU_KIND;
 
 import com.google.gerrit.extensions.registration.DynamicMap;
@@ -24,11 +25,17 @@ import com.google.gerrit.extensions.restapi.RestApiModule;
 public class Module extends RestApiModule {
   @Override
   protected void configure() {
-    DynamicMap.mapOf(binder(), CONFIG_KIND);
-    DynamicMap.mapOf(binder(), TOP_MENU_KIND);
     DynamicMap.mapOf(binder(), CAPABILITY_KIND);
+    DynamicMap.mapOf(binder(), CONFIG_KIND);
+    DynamicMap.mapOf(binder(), TASK_KIND);
+    DynamicMap.mapOf(binder(), TOP_MENU_KIND);
     child(CONFIG_KIND, "capabilities").to(CapabilitiesCollection.class);
+    child(CONFIG_KIND, "tasks").to(TasksCollection.class);
+    get(TASK_KIND).to(GetTask.class);
+    delete(TASK_KIND).to(DeleteTask.class);
     child(CONFIG_KIND, "top-menus").to(TopMenuCollection.class);
     get(CONFIG_KIND, "version").to(GetVersion.class);
+    get(CONFIG_KIND, "preferences").to(GetPreferences.class);
+    put(CONFIG_KIND, "preferences").to(SetPreferences.class);
   }
 }

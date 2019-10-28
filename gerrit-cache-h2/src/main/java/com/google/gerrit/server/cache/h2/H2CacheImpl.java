@@ -11,6 +11,7 @@ import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnel;
 import com.google.common.hash.Funnels;
 import com.google.common.hash.PrimitiveSink;
+import com.google.gerrit.server.cache.PersistentCache;
 import com.google.gerrit.server.util.TimeUtil;
 import com.google.inject.TypeLiteral;
 
@@ -63,7 +64,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * @see H2CacheFactory
  */
-public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
+public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> implements
+    PersistentCache {
   private static final Logger log = LoggerFactory.getLogger(H2CacheImpl.class);
 
   private final Executor executor;
@@ -115,7 +117,7 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
 
   @Override
   public void put(final K key, V val) {
-    final ValueHolder<V> h = new ValueHolder<V>(val);
+    final ValueHolder<V> h = new ValueHolder<>(val);
     h.created = TimeUtil.nowMs();
     mem.put(key, h);
     executor.execute(new Runnable() {
@@ -156,6 +158,7 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
     return mem.stats();
   }
 
+  @Override
   public DiskStats diskStats() {
     return store.diskStats();
   }
@@ -193,29 +196,6 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
     }, delay, TimeUnit.MILLISECONDS);
   }
 
-  public static class DiskStats {
-    long size;
-    long space;
-    long hitCount;
-    long missCount;
-
-    public long size() {
-      return size;
-    }
-
-    public long space() {
-      return space;
-    }
-
-    public long hitCount() {
-      return hitCount;
-    }
-
-    public long requestCount() {
-      return hitCount + missCount;
-    }
-  }
-
   static class ValueHolder<V> {
     final V value;
     long created;
@@ -246,7 +226,7 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
         }
       }
 
-      final ValueHolder<V> h = new ValueHolder<V>(loader.load(key));
+      final ValueHolder<V> h = new ValueHolder<>(loader.load(key));
       h.created = TimeUtil.nowMs();
       executor.execute(new Runnable() {
         @Override
@@ -302,7 +282,7 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
       return (KeyType<K>) OTHER;
     }
 
-    static final KeyType<?> OTHER = new KeyType<Object>();
+    static final KeyType<?> OTHER = new KeyType<>();
     static final KeyType<String> STRING = new KeyType<String>() {
       @Override
       String columnType() {
@@ -333,20 +313,23 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
     private final String url;
     private final KeyType<K> keyType;
     private final long maxSize;
+    private final long expireAfterWrite;
     private final BlockingQueue<SqlHandle> handles;
     private final AtomicLong hitCount = new AtomicLong();
     private final AtomicLong missCount = new AtomicLong();
     private volatile BloomFilter<K> bloomFilter;
     private int estimatedSize;
 
-    SqlStore(String jdbcUrl, TypeLiteral<K> keyType, long maxSize) {
+    SqlStore(String jdbcUrl, TypeLiteral<K> keyType, long maxSize,
+        long expireAfterWrite) {
       this.url = jdbcUrl;
       this.keyType = KeyType.create(keyType);
       this.maxSize = maxSize;
+      this.expireAfterWrite = expireAfterWrite;
 
       int cores = Runtime.getRuntime().availableProcessors();
       int keep = Math.min(cores, 16);
-      this.handles = new ArrayBlockingQueue<SqlHandle>(keep);
+      this.handles = new ArrayBlockingQueue<>(keep);
     }
 
     synchronized void open() {
@@ -428,7 +411,7 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
       try {
         c = acquire();
         if (c.get == null) {
-          c.get = c.conn.prepareStatement("SELECT v FROM data WHERE k=?");
+          c.get = c.conn.prepareStatement("SELECT v, created FROM data WHERE k=?");
         }
         keyType.set(c.get, 1, key);
         ResultSet r = c.get.executeQuery();
@@ -438,9 +421,16 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
             return null;
           }
 
+          Timestamp created = r.getTimestamp(2);
+          if (expired(created)) {
+            invalidate(key);
+            missCount.incrementAndGet();
+            return null;
+          }
+
           @SuppressWarnings("unchecked")
           V val = (V) r.getObject(1);
-          ValueHolder<V> h = new ValueHolder<V>(val);
+          ValueHolder<V> h = new ValueHolder<>(val);
           h.clean = true;
           hitCount.incrementAndGet();
           touch(c, key);
@@ -456,6 +446,14 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
       } finally {
         release(c);
       }
+    }
+
+    private boolean expired(Timestamp created) {
+      if (expireAfterWrite == 0) {
+        return false;
+      }
+      long age = TimeUtil.nowMs() - created.getTime();
+      return 1000 * expireAfterWrite < age;
     }
 
     private void touch(SqlHandle c, K key) throws SQLException {
@@ -572,12 +570,14 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
           r = s.executeQuery("SELECT"
               + " k"
               + ",OCTET_LENGTH(k) + OCTET_LENGTH(v)"
+              + ",created"
               + " FROM data"
               + " ORDER BY accessed");
           try {
             while (maxSize < used && r.next()) {
               K key = keyType.get(r, 1);
-              if (mem.getIfPresent(key) != null) {
+              Timestamp created = r.getTimestamp(3);
+              if (mem.getIfPresent(key) != null && !expired(created)) {
                 touch(c, key);
               } else {
                 invalidate(c, key);
@@ -599,9 +599,8 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
     }
 
     DiskStats diskStats() {
-      DiskStats d = new DiskStats();
-      d.hitCount = hitCount.get();
-      d.missCount = missCount.get();
+      long size = 0;
+      long space = 0;
       SqlHandle c = null;
       try {
         c = acquire();
@@ -613,8 +612,8 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
               + " FROM data");
           try {
             if (r.next()) {
-              d.size = r.getLong(1);
-              d.space = r.getLong(2);
+              size = r.getLong(1);
+              space = r.getLong(2);
             }
           } finally {
             r.close();
@@ -628,7 +627,7 @@ public class H2CacheImpl<K, V> extends AbstractLoadingCache<K, V> {
       } finally {
         release(c);
       }
-      return d;
+      return new DiskStats(size, space, hitCount.get(), missCount.get());
     }
 
     private SqlHandle acquire() throws SQLException {

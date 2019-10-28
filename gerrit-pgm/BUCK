@@ -4,7 +4,6 @@ INIT_API_SRCS = [SRCS + n for n in [
   'init/AllProjectsConfig.java',
   'init/AllProjectsNameOnInitProvider.java',
   'util/ConsoleUI.java',
-  'util/Die.java',
   'init/InitFlags.java',
   'init/InitStep.java',
   'init/InitStep.java',
@@ -51,7 +50,7 @@ INIT_BASE_SRCS = [SRCS + 'BaseInit.java'] + glob(
 
 INIT_BASE_RSRCS = ['src/main/resources/com/google/gerrit/pgm/libraries.config']
 
-java_library2(
+java_library(
   name = 'init-base',
   srcs = INIT_BASE_SRCS,
   resources = INIT_BASE_RSRCS,
@@ -74,14 +73,14 @@ java_library2(
     '//lib:gwtorm',
     '//lib/log:api',
   ],
-  compile_deps = ['//gerrit-launcher:launcher'],
+  provided_deps = ['//gerrit-launcher:launcher'],
   visibility = [
     '//gerrit-war:',
     '//gerrit-acceptance-tests/...',
   ],
 )
 
-java_library2(
+java_library(
   name = 'pgm',
   srcs = glob(
     ['src/main/java/**/*.java'],
@@ -100,6 +99,7 @@ java_library2(
     '//gerrit-gwtexpui:server',
     '//gerrit-httpd:httpd',
     '//gerrit-lucene:lucene',
+    '//gerrit-oauth:oauth',
     '//gerrit-openid:openid',
     '//gerrit-reviewdb:server',
     '//gerrit-server:server',
@@ -113,16 +113,18 @@ java_library2(
     '//lib:h2',
     '//lib:servlet-api-3_1',
     '//lib/guice:guice',
+    '//lib/guice:guice-assistedinject',
     '//lib/guice:guice-servlet',
     '//lib/jetty:server',
     '//lib/jetty:servlet',
+    '//lib/jetty:jmx',
     '//lib/jgit:jgit',
     '//lib/log:api',
     '//lib/log:log4j',
     '//lib/lucene:core',
     '//lib/prolog:prolog-cafe',
   ],
-  compile_deps = ['//gerrit-launcher:launcher'],
+  provided_deps = ['//gerrit-launcher:launcher'],
   visibility = [
     '//:',
     '//gerrit-acceptance-tests/...',
@@ -140,7 +142,7 @@ java_test(
     ':pgm',
     '//gerrit-server:server',
     '//lib:junit',
-    '//lib:easymock',
+    '//lib/easymock:easymock',
     '//lib/guice:guice',
     '//lib/jgit:jgit',
     '//lib/jgit:junit',

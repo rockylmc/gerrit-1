@@ -22,13 +22,13 @@ import com.google.gerrit.common.data.PermissionRange;
 import com.google.gerrit.common.data.RefConfigSection;
 import com.google.gerrit.common.data.SubmitRecord;
 import com.google.gerrit.common.data.SubmitTypeRecord;
+import com.google.gerrit.extensions.common.SubmitType;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.PatchSetApproval;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.server.ReviewDb;
-import com.google.gerrit.server.ApprovalsUtil;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.notedb.ChangeNotes;
@@ -84,32 +84,9 @@ public class ChangeControl {
       }
     }
 
-    public ChangeControl controlFor(Change.Id id, CurrentUser user)
-        throws NoSuchChangeException {
-      final Change change;
-      try {
-        change = db.get().changes().get(id);
-        if (change == null) {
-          throw new NoSuchChangeException(id);
-        }
-      } catch (OrmException e) {
-        throw new NoSuchChangeException(id, e);
-      }
-      return controlFor(change, user);
-    }
-
     public ChangeControl validateFor(Change change, CurrentUser user)
         throws NoSuchChangeException, OrmException {
       ChangeControl c = controlFor(change, user);
-      if (!c.isVisible(db.get())) {
-        throw new NoSuchChangeException(c.getChange().getId());
-      }
-      return c;
-    }
-
-    public ChangeControl validateFor(Change.Id id, CurrentUser user)
-        throws NoSuchChangeException, OrmException {
-      ChangeControl c = controlFor(id, user);
       if (!c.isVisible(db.get())) {
         throw new NoSuchChangeException(c.getChange().getId());
       }
@@ -170,7 +147,7 @@ public class ChangeControl {
     }
   }
 
-  interface AssistedFactory {
+  public interface AssistedFactory {
     ChangeControl create(RefControl refControl, Change change);
     ChangeControl create(RefControl refControl, ChangeNotes notes);
   }
@@ -188,29 +165,25 @@ public class ChangeControl {
     }
   }
 
-  private final ApprovalsUtil approvalsUtil;
   private final ChangeData.Factory changeDataFactory;
   private final RefControl refControl;
   private final ChangeNotes notes;
 
   @AssistedInject
   ChangeControl(
-      ApprovalsUtil approvalsUtil,
       ChangeData.Factory changeDataFactory,
       ChangeNotes.Factory notesFactory,
       @Assisted RefControl refControl,
       @Assisted Change change) {
-    this(approvalsUtil, changeDataFactory, refControl,
+    this(changeDataFactory, refControl,
         notesFactory.create(change));
   }
 
   @AssistedInject
   ChangeControl(
-      ApprovalsUtil approvalsUtil,
       ChangeData.Factory changeDataFactory,
       @Assisted RefControl refControl,
       @Assisted ChangeNotes notes) {
-    this.approvalsUtil = approvalsUtil;
     this.changeDataFactory = changeDataFactory;
     this.refControl = refControl;
     this.notes = notes;
@@ -220,7 +193,7 @@ public class ChangeControl {
     if (getCurrentUser().equals(who)) {
       return this;
     }
-    return new ChangeControl(approvalsUtil, changeDataFactory,
+    return new ChangeControl(changeDataFactory,
         getRefControl().forUser(who), notes);
   }
 
@@ -264,7 +237,7 @@ public class ChangeControl {
 
   /** Can this user see the given patchset? */
   public boolean isPatchVisible(PatchSet ps, ReviewDb db) throws OrmException {
-    if (ps.isDraft() && !isDraftVisible(db, null)) {
+    if (ps != null && ps.isDraft() && !isDraftVisible(db, null)) {
       return false;
     }
     return isVisible(db);
@@ -509,7 +482,7 @@ public class ChangeControl {
    * the out collection is reversed to restore it to the original ordering.
    */
   public List<SubmitRecord> resultsToSubmitRecord(Term submitRule, List<Term> results) {
-    List<SubmitRecord> out = new ArrayList<SubmitRecord>(results.size());
+    List<SubmitRecord> out = new ArrayList<>(results.size());
     for (int resultIdx = results.size() - 1; 0 <= resultIdx; resultIdx--) {
       Term submitRecord = results.get(resultIdx);
       SubmitRecord rec = new SubmitRecord();
@@ -538,7 +511,7 @@ public class ChangeControl {
         return logInvalidResult(submitRule, submitRecord);
       }
 
-      rec.labels = new ArrayList<SubmitRecord.Label> (submitRecord.arity());
+      rec.labels = new ArrayList<>(submitRecord.arity());
 
       for (Term state : ((StructureTerm) submitRecord).args()) {
         if (!state.isStructure() || 2 != state.arity() || !"label".equals(state.name())) {
@@ -640,7 +613,7 @@ public class ChangeControl {
     String typeName = ((SymbolTerm)typeTerm).name();
     try {
       return SubmitTypeRecord.OK(
-          Project.SubmitType.valueOf(typeName.toUpperCase()));
+          SubmitType.valueOf(typeName.toUpperCase()));
     } catch (IllegalArgumentException e) {
       return logInvalidType(evaluator.getSubmitRule(), typeName);
     }

@@ -22,6 +22,7 @@ import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.DownloadSchem
 import com.google.gerrit.reviewdb.client.AuthType;
 import com.google.gerrit.reviewdb.client.Project;
 
+import java.util.List;
 import java.util.Set;
 
 public class GerritConfig implements Cloneable {
@@ -33,7 +34,7 @@ public class GerritConfig implements Cloneable {
   protected String httpPasswordUrl;
   protected String reportBugUrl;
   protected String reportBugText;
-  protected boolean gitBasicAuth;
+  protected boolean httpPasswordSettingsEnabled = true;
 
   protected GitwebConfig gitweb;
   protected boolean useContributorAgreements;
@@ -53,6 +54,7 @@ public class GerritConfig implements Cloneable {
   protected int suggestFrom;
   protected int changeUpdateDelay;
   protected AccountGeneralPreferences.ChangeScreen changeScreen;
+  protected List<String> archiveFormats;
   protected int largeChangeSize;
   protected boolean newFeatures;
 
@@ -112,12 +114,12 @@ public class GerritConfig implements Cloneable {
     reportBugText = t;
   }
 
-  public boolean isGitBasicAuth() {
-    return gitBasicAuth;
+  public boolean isHttpPasswordSettingsEnabled() {
+    return httpPasswordSettingsEnabled;
   }
 
-  public void setGitBasicAuth(boolean gba) {
-    gitBasicAuth = gba;
+  public void setHttpPasswordSettingsEnabled(boolean httpPasswordSettingsEnabled) {
+    this.httpPasswordSettingsEnabled = httpPasswordSettingsEnabled;
   }
 
   public String getEditFullNameUrl() {
@@ -289,6 +291,14 @@ public class GerritConfig implements Cloneable {
 
   public void setLargeChangeSize(int largeChangeSize) {
     this.largeChangeSize = largeChangeSize;
+  }
+
+  public List<String> getArchiveFormats() {
+    return archiveFormats;
+  }
+
+  public void setArchiveFormats(List<String> formats) {
+    archiveFormats = formats;
   }
 
   public boolean getNewFeatures() {

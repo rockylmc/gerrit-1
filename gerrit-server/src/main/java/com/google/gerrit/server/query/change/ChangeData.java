@@ -32,6 +32,7 @@ import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.PatchSetApproval;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
+import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.git.GitRepositoryManager;
@@ -62,6 +63,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -150,8 +152,11 @@ public class ChangeData {
    * @param id change ID
    * @return instance for testing.
    */
-  static ChangeData createForTest(Change.Id id) {
-    return new ChangeData(null, null, null, null, null, null, null, null, id);
+  static ChangeData createForTest(Change.Id id, int currentPatchSetId) {
+    ChangeData cd = new ChangeData(null, null, null, null, null,
+        null, null, null, null, id);
+    cd.currentPatchSet = new PatchSet(new PatchSet.Id(id, currentPatchSetId));
+    return cd;
   }
 
   private final ReviewDb db;
@@ -160,6 +165,7 @@ public class ChangeData {
   private final IdentifiedUser.GenericFactory userFactory;
   private final ChangeNotes.Factory notesFactory;
   private final ApprovalsUtil approvalsUtil;
+  private final ChangeMessagesUtil cmUtil;
   private final PatchListCache patchListCache;
   private final NotesMigration notesMigration;
   private final Change.Id legacyId;
@@ -172,7 +178,7 @@ public class ChangeData {
   private Collection<PatchSet> patches;
   private ListMultimap<PatchSet.Id, PatchSetApproval> allApprovals;
   private List<PatchSetApproval> currentApprovals;
-  private List<String> currentFiles;
+  private Map<Integer, List<String>> files = new HashMap<>();
   private Collection<PatchLineComment> comments;
   private CurrentUser visibleTo;
   private ChangeControl changeControl;
@@ -187,6 +193,7 @@ public class ChangeData {
       IdentifiedUser.GenericFactory userFactory,
       ChangeNotes.Factory notesFactory,
       ApprovalsUtil approvalsUtil,
+      ChangeMessagesUtil cmUtil,
       PatchListCache patchListCache,
       NotesMigration notesMigration,
       @Assisted ReviewDb db,
@@ -197,6 +204,7 @@ public class ChangeData {
     this.userFactory = userFactory;
     this.notesFactory = notesFactory;
     this.approvalsUtil = approvalsUtil;
+    this.cmUtil = cmUtil;
     this.patchListCache = patchListCache;
     this.notesMigration = notesMigration;
     legacyId = id;
@@ -209,6 +217,7 @@ public class ChangeData {
       IdentifiedUser.GenericFactory userFactory,
       ChangeNotes.Factory notesFactory,
       ApprovalsUtil approvalsUtil,
+      ChangeMessagesUtil cmUtil,
       PatchListCache patchListCache,
       NotesMigration notesMigration,
       @Assisted ReviewDb db,
@@ -219,6 +228,7 @@ public class ChangeData {
     this.userFactory = userFactory;
     this.notesFactory = notesFactory;
     this.approvalsUtil = approvalsUtil;
+    this.cmUtil = cmUtil;
     this.patchListCache = patchListCache;
     this.notesMigration = notesMigration;
     legacyId = c.getId();
@@ -232,6 +242,7 @@ public class ChangeData {
       IdentifiedUser.GenericFactory userFactory,
       ChangeNotes.Factory notesFactory,
       ApprovalsUtil approvalsUtil,
+      ChangeMessagesUtil cmUtil,
       PatchListCache patchListCache,
       NotesMigration notesMigration,
       @Assisted ReviewDb db,
@@ -242,6 +253,7 @@ public class ChangeData {
     this.userFactory = userFactory;
     this.notesFactory = notesFactory;
     this.approvalsUtil = approvalsUtil;
+    this.cmUtil = cmUtil;
     this.patchListCache = patchListCache;
     this.notesMigration = notesMigration;
     legacyId = c.getChange().getId();
@@ -258,18 +270,25 @@ public class ChangeData {
     returnedBySource = s;
   }
 
-  public void setCurrentFilePaths(List<String> filePaths) {
-    currentFiles = ImmutableList.copyOf(filePaths);
+  public void setCurrentFilePaths(List<String> filePaths) throws OrmException {
+    PatchSet ps = currentPatchSet();
+    if (ps != null) {
+      files.put(ps.getPatchSetId(), ImmutableList.copyOf(filePaths));
+    }
   }
 
   public List<String> currentFilePaths() throws OrmException {
-    if (currentFiles == null) {
+    PatchSet ps = currentPatchSet();
+    if (ps == null) {
+      return null;
+    }
+    return filePaths(currentPatchSet);
+  }
+
+  public List<String> filePaths(PatchSet ps) throws OrmException {
+    if (!files.containsKey(ps.getPatchSetId())) {
       Change c = change();
       if (c == null) {
-        return null;
-      }
-      PatchSet ps = currentPatchSet();
-      if (ps == null) {
         return null;
       }
 
@@ -277,11 +296,12 @@ public class ChangeData {
       try {
         p = patchListCache.get(c, ps);
       } catch (PatchListNotAvailableException e) {
-        currentFiles = Collections.emptyList();
-        return currentFiles;
+        List<String> emptyFileList = Collections.emptyList();
+        files.put(ps.getPatchSetId(), emptyFileList);
+        return emptyFileList;
       }
 
-      List<String> r = new ArrayList<String>(p.getPatches().size());
+      List<String> r = new ArrayList<>(p.getPatches().size());
       for (PatchListEntry e : p.getPatches()) {
         if (Patch.COMMIT_MSG.equals(e.getNewName())) {
           continue;
@@ -302,9 +322,9 @@ public class ChangeData {
         }
       }
       Collections.sort(r);
-      currentFiles = Collections.unmodifiableList(r);
+      files.put(ps.getPatchSetId(), Collections.unmodifiableList(r));
     }
-    return currentFiles;
+    return files.get(ps.getPatchSetId());
   }
 
   public ChangedLines changedLines() throws OrmException {
@@ -331,6 +351,10 @@ public class ChangeData {
     return changedLines;
   }
 
+  public void setChangedLines(int insertions, int deletions) {
+    changedLines = new ChangedLines(insertions, deletions);
+  }
+
   public Change.Id getId() {
     return legacyId;
   }
@@ -343,12 +367,15 @@ public class ChangeData {
     return changeControl != null;
   }
 
-  public ChangeControl changeControl() throws NoSuchChangeException,
-      OrmException {
+  public ChangeControl changeControl() throws OrmException {
     if (changeControl == null) {
       Change c = change();
-      changeControl =
-          changeControlFactory.controlFor(c, userFactory.create(c.getOwner()));
+      try {
+        changeControl =
+            changeControlFactory.controlFor(c, userFactory.create(c.getOwner()));
+      } catch (NoSuchChangeException e) {
+        throw new OrmException(e);
+      }
     }
     return changeControl;
   }
@@ -394,11 +421,9 @@ public class ChangeData {
       Change c = change();
       if (c == null) {
         currentApprovals = Collections.emptyList();
-      } else if (allApprovals != null) {
-        return allApprovals.get(c.currentPatchSetId());
       } else {
-        currentApprovals = approvalsUtil.byPatchSet(
-            db, notes(), c.currentPatchSetId());
+        currentApprovals = ImmutableList.copyOf(approvalsUtil.byPatchSet(
+            db, changeControl(), c.currentPatchSetId()));
       }
     }
     return currentApprovals;
@@ -505,7 +530,7 @@ public class ChangeData {
   public List<ChangeMessage> messages()
       throws OrmException {
     if (messages == null) {
-      messages = db.changeMessages().byChange(legacyId).toList();
+      messages = cmUtil.byChange(db, notes());
     }
     return messages;
   }

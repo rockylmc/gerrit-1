@@ -15,10 +15,9 @@
 
 from __future__ import print_function
 from optparse import OptionParser
-from os import makedirs, path, symlink
-from subprocess import check_call
+from os import getcwd, chdir, makedirs, path, symlink
+from subprocess import check_call, check_output
 import sys
-from util import check_output
 
 opts = OptionParser()
 opts.add_option('-o', help='path to write WAR to')
@@ -31,8 +30,11 @@ war = args.tmp
 root = war[:war.index('buck-out')]
 jars = set()
 
+
 def link_jars(libs, directory):
   makedirs(directory)
+  while not path.isfile('.buckconfig'):
+    chdir('..')
   try:
     cp = check_output(['buck', 'audit', 'classpath'] + libs)
   except Exception as e:
@@ -53,7 +55,7 @@ if args.pgmlib:
 try:
   for s in ctx:
     check_call(['unzip', '-q', '-d', war, s])
-  check_call(['zip', '-9qr', args.o, '.'], cwd = war)
+  check_call(['zip', '-9qr', args.o, '.'], cwd=war)
 except KeyboardInterrupt:
   print('Interrupted by user', file=sys.stderr)
   exit(1)

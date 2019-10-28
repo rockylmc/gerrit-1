@@ -14,8 +14,8 @@
 
 package com.google.gerrit.server.git.strategy;
 
+import com.google.gerrit.extensions.common.SubmitType;
 import com.google.gerrit.reviewdb.client.Branch;
-import com.google.gerrit.reviewdb.client.Project.SubmitType;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
 import com.google.gerrit.server.GerritPersonIdent;
@@ -32,6 +32,7 @@ import com.google.gerrit.server.project.ProjectCache;
 import com.google.gerrit.server.project.ProjectState;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.lib.ObjectInserter;
 import org.eclipse.jgit.lib.PersonIdent;
@@ -45,6 +46,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Set;
 
 /** Factory to create a {@link SubmitStrategy} for a {@link SubmitType}. */
+@Singleton
 public class SubmitStrategyFactory {
   private static final Logger log = LoggerFactory
       .getLogger(SubmitStrategyFactory.class);

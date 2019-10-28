@@ -16,20 +16,25 @@ package com.google.gerrit.sshd.commands;
 
 import static com.google.gerrit.sshd.CommandMetaData.Mode.MASTER_OR_SLAVE;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheStats;
-import com.google.common.collect.Maps;
+import com.google.common.base.Strings;
 import com.google.gerrit.common.Version;
 import com.google.gerrit.common.data.GlobalCapability;
 import com.google.gerrit.extensions.annotations.RequiresCapability;
 import com.google.gerrit.extensions.events.LifecycleListener;
-import com.google.gerrit.extensions.registration.DynamicMap;
-import com.google.gerrit.server.cache.h2.H2CacheImpl;
-import com.google.gerrit.server.config.SitePath;
-import com.google.gerrit.server.git.WorkQueue;
-import com.google.gerrit.server.git.WorkQueue.Task;
+import com.google.gerrit.server.CurrentUser;
+import com.google.gerrit.server.config.ConfigResource;
+import com.google.gerrit.server.config.GetSummary;
+import com.google.gerrit.server.config.GetSummary.JvmSummaryInfo;
+import com.google.gerrit.server.config.GetSummary.MemSummaryInfo;
+import com.google.gerrit.server.config.GetSummary.SummaryInfo;
+import com.google.gerrit.server.config.GetSummary.TaskSummaryInfo;
+import com.google.gerrit.server.config.GetSummary.ThreadSummaryInfo;
+import com.google.gerrit.server.config.ListCaches;
+import com.google.gerrit.server.config.ListCaches.CacheInfo;
+import com.google.gerrit.server.config.ListCaches.CacheType;
 import com.google.gerrit.server.util.TimeUtil;
 import com.google.gerrit.sshd.CommandMetaData;
+import com.google.gerrit.sshd.SshCommand;
 import com.google.gerrit.sshd.SshDaemon;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
@@ -38,27 +43,20 @@ import org.apache.sshd.common.io.IoAcceptor;
 import org.apache.sshd.common.io.IoSession;
 import org.apache.sshd.common.io.mina.MinaSession;
 import org.apache.sshd.server.Environment;
-import org.eclipse.jgit.internal.storage.file.WindowCacheStatAccessor;
 import org.kohsuke.args4j.Option;
 
-import java.io.File;
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
-import java.lang.management.RuntimeMXBean;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
 import java.util.Map;
-import java.util.SortedMap;
+import java.util.Map.Entry;
 
 /** Show the current cache states. */
 @RequiresCapability(GlobalCapability.VIEW_CACHES)
 @CommandMetaData(name = "show-caches", description = "Display current cache statistics",
   runsAt = MASTER_OR_SLAVE)
-final class ShowCaches extends CacheCommand {
+final class ShowCaches extends SshCommand {
   private static volatile long serverStarted;
 
   static class StartupListener implements LifecycleListener {
@@ -78,15 +76,20 @@ final class ShowCaches extends CacheCommand {
   @Option(name = "--show-jvm", usage = "show details about the JVM")
   private boolean showJVM;
 
-  @Inject
-  private WorkQueue workQueue;
+  @Option(name = "--show-threads", usage = "show detailed thread counts")
+  private boolean showThreads;
 
   @Inject
   private SshDaemon daemon;
 
   @Inject
-  @SitePath
-  private File sitePath;
+  private Provider<ListCaches> listCaches;
+
+  @Inject
+  private Provider<GetSummary> getSummary;
+
+  @Inject
+  private Provider<CurrentUser> self;
 
   @Option(name = "--width", aliases = {"-w"}, metaVar = "COLS", usage = "width of output table")
   private int columns = 80;
@@ -106,7 +109,7 @@ final class ShowCaches extends CacheCommand {
   }
 
   @Override
-  protected void run() {
+  protected void run() throws UnloggedFailure {
     nw = columns - 50;
     Date now = new Date();
     stdout.format(
@@ -145,128 +148,131 @@ final class ShowCaches extends CacheCommand {
     }
     stdout.print("+---------------------+---------+---------+\n");
 
-    Map<String, H2CacheImpl<?, ?>> disks = Maps.newTreeMap();
-    printMemoryCaches(disks, sortedCoreCaches());
-    printMemoryCaches(disks, sortedPluginCaches());
-    for (Map.Entry<String, H2CacheImpl<?, ?>> entry : disks.entrySet()) {
-      H2CacheImpl<?, ?> cache = entry.getValue();
-      CacheStats stat = cache.stats();
-      H2CacheImpl.DiskStats disk = cache.diskStats();
-      stdout.print(String.format(
-          "D %-"+nw+"s|%6s %6s %7s| %7s |%4s %4s|\n",
-          entry.getKey(),
-          count(cache.size()),
-          count(disk.size()),
-          bytes(disk.space()),
-          duration(stat.averageLoadPenalty()),
-          percent(stat.hitCount(), stat.requestCount()),
-          percent(disk.hitCount(), disk.requestCount())));
-    }
+    Collection<CacheInfo> caches = getCaches();
+    printMemoryCoreCaches(caches);
+    printMemoryPluginCaches(caches);
+    printDiskCaches(caches);
     stdout.print('\n');
 
-    if (gc) {
-      System.gc();
-      System.runFinalization();
-      System.gc();
-    }
+    if (self.get().getCapabilities().canAdministrateServer()) {
+      sshSummary();
 
-    sshSummary();
-    taskSummary();
-    memSummary();
+      SummaryInfo summary =
+          getSummary.get().setGc(gc).setJvm(showJVM).apply(new ConfigResource());
+      taskSummary(summary.taskSummary);
+      memSummary(summary.memSummary);
+      threadSummary(summary.threadSummary);
 
-    if (showJVM) {
-      jvmSummary();
+      if (showJVM && summary.jvmSummary != null) {
+        jvmSummary(summary.jvmSummary);
+      }
     }
 
     stdout.flush();
   }
 
-  private void printMemoryCaches(
-      Map<String, H2CacheImpl<?, ?>> disks,
-      Map<String, Cache<?,?>> caches) {
-    for (Map.Entry<String, Cache<?,?>> entry : caches.entrySet()) {
-      Cache<?,?> cache = entry.getValue();
-      if (cache instanceof H2CacheImpl) {
-        disks.put(entry.getKey(), (H2CacheImpl<?,?>)cache);
-        continue;
-      }
-      CacheStats stat = cache.stats();
-      stdout.print(String.format(
-          "  %-"+nw+"s|%6s %6s %7s| %7s |%4s %4s|\n",
-          entry.getKey(),
-          count(cache.size()),
-          "",
-          "",
-          duration(stat.averageLoadPenalty()),
-          percent(stat.hitCount(), stat.requestCount()),
-          ""));
+  private Collection<CacheInfo> getCaches() {
+    @SuppressWarnings("unchecked")
+    Map<String, CacheInfo> caches =
+        (Map<String, CacheInfo>) listCaches.get().apply(new ConfigResource());
+    for (Map.Entry<String, CacheInfo> entry : caches.entrySet()) {
+      CacheInfo cache = entry.getValue();
+      cache.name = entry.getKey();
     }
+    return caches.values();
   }
 
-  private Map<String, Cache<?, ?>> sortedCoreCaches() {
-    SortedMap<String, Cache<?, ?>> m = Maps.newTreeMap();
-    for (Map.Entry<String, Provider<Cache<?, ?>>> entry :
-        cacheMap.byPlugin("gerrit").entrySet()) {
-      m.put(cacheNameOf("gerrit", entry.getKey()), entry.getValue().get());
-    }
-    return m;
-  }
-
-  private Map<String, Cache<?, ?>> sortedPluginCaches() {
-    SortedMap<String, Cache<?, ?>> m = Maps.newTreeMap();
-    for (DynamicMap.Entry<Cache<?, ?>> e : cacheMap) {
-      if (!"gerrit".equals(e.getPluginName())) {
-        m.put(cacheNameOf(e.getPluginName(), e.getExportName()),
-            e.getProvider().get());
+  private void printMemoryCoreCaches(Collection<CacheInfo> caches) {
+    for (CacheInfo cache : caches) {
+      if (!cache.name.contains("-") && CacheType.MEM.equals(cache.type)) {
+        printCache(cache);
       }
     }
-    return m;
   }
 
-  private void memSummary() {
-    final Runtime r = Runtime.getRuntime();
-    final long mMax = r.maxMemory();
-    final long mFree = r.freeMemory();
-    final long mTotal = r.totalMemory();
-    final long mInuse = mTotal - mFree;
+  private void printMemoryPluginCaches(Collection<CacheInfo> caches) {
+    for (CacheInfo cache : caches) {
+      if (cache.name.contains("-") && CacheType.MEM.equals(cache.type)) {
+        printCache(cache);
+      }
+    }
+  }
 
-    final int jgitOpen = WindowCacheStatAccessor.getOpenFiles();
-    final long jgitBytes = WindowCacheStatAccessor.getOpenBytes();
+  private void printDiskCaches(Collection<CacheInfo> caches) {
+    for (CacheInfo cache : caches) {
+      if (CacheType.DISK.equals(cache.type)) {
+        printCache(cache);
+      }
+    }
+  }
 
+  private void printCache(CacheInfo cache) {
+    stdout.print(String.format(
+        "%1s %-"+nw+"s|%6s %6s %7s| %7s |%4s %4s|\n",
+        CacheType.DISK.equals(cache.type) ? "D" : "",
+        cache.name,
+        nullToEmpty(cache.entries.mem),
+        nullToEmpty(cache.entries.disk),
+        Strings.nullToEmpty(cache.entries.space),
+        Strings.nullToEmpty(cache.averageGet),
+        formatAsPercent(cache.hitRatio.mem),
+        formatAsPercent(cache.hitRatio.disk)
+      ));
+  }
+
+  private static String nullToEmpty(Long l) {
+    return l != null ? String.valueOf(l) : "";
+  }
+
+  private static String formatAsPercent(Integer i) {
+    return i != null ? String.valueOf(i) + "%" : "";
+  }
+
+  private void memSummary(MemSummaryInfo memSummary) {
     stdout.format("Mem: %s total = %s used + %s free + %s buffers\n",
-        bytes(mTotal),
-        bytes(mInuse - jgitBytes),
-        bytes(mFree),
-        bytes(jgitBytes));
-    stdout.format("     %s max\n", bytes(mMax));
-    stdout.format("    %8d open files, %8d cpus available, %8d threads\n",
-        jgitOpen,
-        r.availableProcessors(),
-        ManagementFactory.getThreadMXBean().getThreadCount());
+        memSummary.total,
+        memSummary.used,
+        memSummary.free,
+        memSummary.buffers);
+    stdout.format("     %s max\n", memSummary.max);
+    stdout.format("    %8d open files\n",
+        nullToZero(memSummary.openFiles));
     stdout.print('\n');
   }
 
-  private void taskSummary() {
-    Collection<Task<?>> pending = workQueue.getTasks();
-    int tasksTotal = pending.size();
-    int tasksRunning = 0, tasksReady = 0, tasksSleeping = 0;
-    for (Task<?> task : pending) {
-      switch (task.getState()) {
-        case RUNNING: tasksRunning++; break;
-        case READY: tasksReady++; break;
-        case SLEEPING: tasksSleeping++; break;
-        case CANCELLED:
-        case DONE:
-        case OTHER:
-          break;
+  private void threadSummary(ThreadSummaryInfo threadSummary) {
+    stdout.format("Threads: %d CPUs available, %d threads\n",
+        threadSummary.cpus, threadSummary.threads);
+
+    if (showThreads) {
+      stdout.print(String.format("  %22s", ""));
+      for (Thread.State s : Thread.State.values()) {
+        stdout.print(String.format(" %14s", s.name()));
+      }
+      stdout.print('\n');
+      for (Entry<String, Map<Thread.State, Integer>> e :
+          threadSummary.counts.entrySet()) {
+        stdout.print(String.format("  %-22s", e.getKey()));
+        for (Thread.State s : Thread.State.values()) {
+          stdout.print(String.format(" %14d", nullToZero(e.getValue().get(s))));
+        }
+        stdout.print('\n');
       }
     }
+    stdout.print('\n');
+  }
+
+  private void taskSummary(TaskSummaryInfo taskSummary) {
     stdout.format(
         "Tasks: %4d  total = %4d running +   %4d ready + %4d sleeping\n",
-        tasksTotal,
-        tasksRunning,
-        tasksReady,
-        tasksSleeping);
+        nullToZero(taskSummary.total),
+        nullToZero(taskSummary.running),
+        nullToZero(taskSummary.ready),
+        nullToZero(taskSummary.sleeping));
+  }
+
+  private static int nullToZero(Integer i) {
+    return i != null ? i : 0;
   }
 
   private void sshSummary() {
@@ -292,33 +298,20 @@ final class ShowCaches extends CacheCommand {
         uptime(now - oldest));
   }
 
-  private void jvmSummary() {
-    OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
-    RuntimeMXBean runtimeBean = ManagementFactory.getRuntimeMXBean();
+  private void jvmSummary(JvmSummaryInfo jvmSummary) {
     stdout.format("JVM: %s %s %s\n",
-        runtimeBean.getVmVendor(),
-        runtimeBean.getVmName(),
-        runtimeBean.getVmVersion());
+        jvmSummary.vmVendor,
+        jvmSummary.vmName,
+        jvmSummary.vmVersion);
     stdout.format("  on %s %s %s\n",
-        osBean.getName(),
-        osBean.getVersion(),
-        osBean.getArch());
-    try {
-      stdout.format("  running as %s on %s\n",
-          System.getProperty("user.name"),
-          InetAddress.getLocalHost().getHostName());
-    } catch (UnknownHostException e) {
-    }
-    stdout.format("  cwd  %s\n", path(new File(".").getAbsoluteFile().getParentFile()));
-    stdout.format("  site %s\n", path(sitePath));
-  }
-
-  private String path(File file) {
-    try {
-      return file.getCanonicalPath();
-    } catch (IOException err) {
-      return file.getAbsolutePath();
-    }
+        jvmSummary.osName,
+        jvmSummary.osVersion,
+        jvmSummary.osArch);
+    stdout.format("  running as %s on %s\n",
+        jvmSummary.user,
+        Strings.nullToEmpty(jvmSummary.host));
+    stdout.format("  cwd  %s\n", jvmSummary.currentWorkingDirectory);
+    stdout.format("  site %s\n", jvmSummary.site);
   }
 
   private String uptime(long uptimeMillis) {
@@ -342,55 +335,5 @@ final class ShowCaches extends CacheCommand {
     long days = uptime / (24 * 3600);
     hr = (uptime - (days * 24 * 3600)) / 3600;
     return String.format("%4d days %2d hrs", days, hr);
-  }
-
-  private String bytes(double value) {
-    value /= 1024;
-    String suffix = "k";
-
-    if (value > 1024) {
-      value /= 1024;
-      suffix = "m";
-    }
-    if (value > 1024) {
-      value /= 1024;
-      suffix = "g";
-    }
-    return String.format("%1$6.2f%2$s", value, suffix);
-  }
-
-  private String count(long cnt) {
-    if (cnt == 0) {
-      return "";
-    }
-    return String.format("%6d", cnt);
-  }
-
-  private String duration(double ns) {
-    if (ns < 0.5) {
-      return "";
-    }
-    String suffix = "ns";
-    if (ns >= 1000.0) {
-      ns /= 1000.0;
-      suffix = "us";
-    }
-    if (ns >= 1000.0) {
-      ns /= 1000.0;
-      suffix = "ms";
-    }
-    if (ns >= 1000.0) {
-      ns /= 1000.0;
-      suffix = "s ";
-    }
-    return String.format("%4.1f%s", ns, suffix);
-  }
-
-  private String percent(final long value, final long total) {
-    if (total <= 0) {
-      return "";
-    }
-    final long pcent = (100 * value) / total;
-    return String.format("%3d%%", (int) pcent);
   }
 }

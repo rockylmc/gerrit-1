@@ -64,7 +64,7 @@ public class ProjectWatch {
   /** Returns all watchers that are relevant */
   public final Watchers getWatchers(NotifyType type) throws OrmException {
     Watchers matching = new Watchers();
-    Set<Account.Id> projectWatchers = new HashSet<Account.Id>();
+    Set<Account.Id> projectWatchers = new HashSet<>();
 
     for (AccountProjectWatch w : args.db.get().accountProjectWatches()
         .byProject(project)) {
@@ -166,7 +166,7 @@ public class ProjectWatch {
       for (AccountGroupMember m : db.accountGroupMembers().byGroup(ig.getId())) {
         matching.accounts.add(m.getAccountId());
       }
-      for (AccountGroup.UUID m : args.groupIncludes.membersOf(uuid)) {
+      for (AccountGroup.UUID m : args.groupIncludes.subgroupsOf(uuid)) {
         if (seen.add(m)) {
           q.add(m);
         }

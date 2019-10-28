@@ -28,7 +28,6 @@ import com.google.inject.Injector;
 import org.eclipse.jgit.internal.storage.file.FileSnapshot;
 
 import java.io.File;
-import java.util.jar.JarFile;
 
 class JsPlugin extends Plugin {
   private Injector httpInjector;
@@ -64,11 +63,6 @@ class JsPlugin extends Plugin {
       manager.stop();
       httpInjector = null;
     }
-  }
-
-  @Override
-  public JarFile getJarFile() {
-    return null;
   }
 
   @Override
@@ -108,5 +102,10 @@ class JsPlugin extends Plugin {
       DynamicSet.bind(binder(), WebUiPlugin.class).toInstance(
           new JavaScriptPlugin(fileName));
     }
+  }
+
+  @Override
+  public PluginContentScanner getContentScanner() {
+    return PluginContentScanner.EMPTY;
   }
 }

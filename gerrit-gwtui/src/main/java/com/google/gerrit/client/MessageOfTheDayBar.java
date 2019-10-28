@@ -52,6 +52,8 @@ class MessageOfTheDayBar extends Composite {
       for (HostPageData.Message m : motd) {
         b.openDiv();
         b.append(SafeHtml.asis(m.html));
+        b.openElement("hr");
+        b.closeSelf();
         b.closeDiv();
       }
     }
@@ -74,7 +76,7 @@ class MessageOfTheDayBar extends Composite {
   }
 
   private static List<HostPageData.Message> filter(List<HostPageData.Message> in) {
-    List<HostPageData.Message> show = new ArrayList<HostPageData.Message>();
+    List<HostPageData.Message> show = new ArrayList<>();
     for (HostPageData.Message m : in) {
       if (Cookies.getCookie(cookieName(m)) == null) {
         show.add(m);

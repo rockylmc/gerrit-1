@@ -82,6 +82,10 @@ public class Schema<T> {
     return fields;
   }
 
+  public final boolean hasField(FieldDef<T, ?> field) {
+    return fields.get(field.getName()) == field;
+  }
+
   /**
    * Build all fields in the schema from an input object.
    * <p>
@@ -109,9 +113,9 @@ public class Schema<T> {
             if (v == null) {
               return null;
             } else if (f.isRepeatable()) {
-              return new Values<T>(f, (Iterable<?>) v);
+              return new Values<>(f, (Iterable<?>) v);
             } else {
-              return new Values<T>(f, Collections.singleton(v));
+              return new Values<>(f, Collections.singleton(v));
             }
           }
         }).filter(Predicates.notNull());

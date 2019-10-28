@@ -3,7 +3,7 @@ SRCS = glob(
 )
 RESOURCES = glob(['src/main/resources/**/*'])
 
-java_library2(
+java_library(
   name = 'httpd',
   srcs = SRCS,
   resources = RESOURCES,
@@ -34,7 +34,7 @@ java_library2(
     '//lib/log:api',
     '//lib/lucene:core',
   ],
-  compile_deps = ['//lib:servlet-api-3_1'],
+  provided_deps = ['//lib:servlet-api-3_1'],
   visibility = ['PUBLIC'],
 )
 
@@ -53,12 +53,12 @@ java_test(
     '//gerrit-extension-api:api',
     '//gerrit-reviewdb:server',
     '//gerrit-server:server',
-    '//lib:easymock',
     '//lib:junit',
     '//lib:gson',
     '//lib:gwtorm',
     '//lib:guava',
     '//lib:servlet-api-3_1',
+    '//lib/easymock:easymock',
     '//lib/guice:guice',
     '//lib/jgit:jgit',
     '//lib/jgit:junit',

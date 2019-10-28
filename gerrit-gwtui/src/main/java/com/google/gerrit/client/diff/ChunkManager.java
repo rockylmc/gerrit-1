@@ -14,6 +14,8 @@
 
 package com.google.gerrit.client.diff;
 
+import static com.google.gerrit.client.diff.DisplaySide.A;
+import static com.google.gerrit.client.diff.DisplaySide.B;
 import static com.google.gerrit.client.diff.OverviewBar.MarkType.DELETE;
 import static com.google.gerrit.client.diff.OverviewBar.MarkType.EDIT;
 import static com.google.gerrit.client.diff.OverviewBar.MarkType.INSERT;
@@ -21,11 +23,14 @@ import static com.google.gerrit.client.diff.OverviewBar.MarkType.INSERT;
 import com.google.gerrit.client.diff.DiffInfo.Region;
 import com.google.gerrit.client.diff.DiffInfo.Span;
 import com.google.gerrit.client.rpc.Natives;
+import com.google.gwt.core.client.JavaScriptObject;
 import com.google.gwt.core.client.JsArray;
 import com.google.gwt.core.client.JsArrayString;
 import com.google.gwt.dom.client.Element;
+import com.google.gwt.dom.client.NativeEvent;
 import com.google.gwt.dom.client.Style.Unit;
 import com.google.gwt.user.client.DOM;
+import com.google.gwt.user.client.EventListener;
 
 import net.codemirror.lib.CodeMirror;
 import net.codemirror.lib.CodeMirror.LineClassWhere;
@@ -41,6 +46,36 @@ import java.util.List;
 
 /** Colors modified regions for {@link SideBySide2}. */
 class ChunkManager {
+  private static final String DATA_LINES = "_cs2h";
+  private static double guessedLineHeightPx = 15;
+  private static final JavaScriptObject focusA = initOnClick(A);
+  private static final JavaScriptObject focusB = initOnClick(B);
+  private static final native JavaScriptObject initOnClick(DisplaySide s) /*-{
+    return $entry(function(e){
+      @com.google.gerrit.client.diff.ChunkManager::focus(
+        Lcom/google/gwt/dom/client/NativeEvent;
+        Lcom/google/gerrit/client/diff/DisplaySide;)(e,s)
+    });
+  }-*/;
+
+  private static void focus(NativeEvent event, DisplaySide side) {
+    Element e = Element.as(event.getEventTarget());
+    for (e = DOM.getParent(e); e != null; e = DOM.getParent(e)) {
+      EventListener l = DOM.getEventListener(e);
+      if (l instanceof SideBySide2) {
+        ((SideBySide2) l).getCmFromSide(side).focus();
+        event.stopPropagation();
+      }
+    }
+  };
+
+  static void focusOnClick(Element e, DisplaySide side) {
+    onClick(e, side == A ? focusA : focusB);
+  }
+
+  private static final native void onClick(Element e, JavaScriptObject f)
+  /*-{ e.onclick = f }-*/;
+
   private final SideBySide2 host;
   private final CodeMirror cmA;
   private final CodeMirror cmB;
@@ -51,6 +86,7 @@ class ChunkManager {
   private List<TextMarker> markers;
   private List<Runnable> undo;
   private List<LineWidget> padding;
+  private List<Element> paddingDivs;
 
   ChunkManager(SideBySide2 host,
       CodeMirror cmA,
@@ -68,15 +104,7 @@ class ChunkManager {
   }
 
   DiffChunkInfo getFirst() {
-    if (!chunks.isEmpty()) {
-      for (DiffChunkInfo d : chunks) {
-        if (d.getSide() == DisplaySide.B) {
-          return d;
-        }
-      }
-      return chunks.get(0);
-    }
-    return null;
+    return !chunks.isEmpty() ? chunks.get(0) : null;
   }
 
   void reset() {
@@ -97,6 +125,7 @@ class ChunkManager {
     markers = new ArrayList<>();
     undo = new ArrayList<>();
     padding = new ArrayList<>();
+    paddingDivs = new ArrayList<>();
 
     String diffColor = diff.meta_a() == null || diff.meta_b() == null
         ? DiffTable.style.intralineBg()
@@ -112,6 +141,25 @@ class ChunkManager {
       } else {
         render(current, diffColor);
       }
+    }
+
+    if (paddingDivs.isEmpty()) {
+      paddingDivs = null;
+    }
+  }
+
+  void adjustPadding() {
+    if (paddingDivs != null) {
+      double h = host.getLineHeightPx();
+      for (Element div : paddingDivs) {
+        int lines = div.getPropertyInt(DATA_LINES);
+        div.getStyle().setHeight(lines * h, Unit.PX);
+      }
+      for (LineWidget w : padding) {
+        w.changed();
+      }
+      paddingDivs = null;
+      guessedLineHeightPx = h;
     }
   }
 
@@ -218,16 +266,14 @@ class ChunkManager {
    * @param len number of lines to pad. Padding is inserted only if
    *        {@code len >= 1}.
    */
-  private void addPadding(CodeMirror cm, int line, int len) {
+  private void addPadding(CodeMirror cm, int line, final int len) {
     if (0 < len) {
-      // DiffTable adds 1px bottom padding to each line to preserve
-      // sufficient space for underscores commonly appearing in code.
-      // Padding should be 1em + 1px high for each line. Add within
-      // the browser using height + padding-bottom.
       Element pad = DOM.createDiv();
       pad.setClassName(DiffTable.style.padding());
-      pad.getStyle().setHeight(len, Unit.EM);
-      pad.getStyle().setPaddingBottom(len, Unit.PX);
+      pad.setPropertyInt(DATA_LINES, len);
+      pad.getStyle().setHeight(guessedLineHeightPx * len, Unit.PX);
+      focusOnClick(pad, cm.side());
+      paddingDivs.add(pad);
       padding.add(cm.addLineWidget(
         line == -1 ? 0 : line,
         pad,
@@ -263,7 +309,7 @@ class ChunkManager {
 
         DiffChunkInfo lookUp = chunks.get(res);
         // If edit, skip the deletion chunk and set focus on the insertion one.
-        if (lookUp.isEdit() && lookUp.getSide() == DisplaySide.A) {
+        if (lookUp.isEdit() && lookUp.getSide() == A) {
           res = res + (dir == Direction.PREV ? -1 : 1);
           if (res < 0 || chunks.size() <= res) {
             return;
@@ -291,7 +337,7 @@ class ChunkManager {
       public int compare(DiffChunkInfo a, DiffChunkInfo b) {
         if (a.getSide() == b.getSide()) {
           return a.getStart() - b.getStart();
-        } else if (a.getSide() == DisplaySide.A) {
+        } else if (a.getSide() == A) {
           int comp = mapper.lineOnOther(a.getSide(), a.getStart())
               .getLine() - b.getStart();
           return comp == 0 ? -1 : comp;

@@ -20,6 +20,8 @@ java_binary(
 java_library(
   name = 'lib',
   exported_deps = PLUGIN_API + [
+    '//gerrit-antlr:query_exception',
+    '//gerrit-antlr:query_parser',
     '//gerrit-common:annotations',
     '//gerrit-common:server',
     '//gerrit-extension-api:api',
@@ -59,4 +61,5 @@ java_doc(
     '//lib/bouncycastle:bcpg',
   ],
   visibility = ['PUBLIC'],
+  do_it_wrong = True,
 )

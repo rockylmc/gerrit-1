@@ -28,9 +28,9 @@ import com.google.gerrit.common.data.LabelValue;
 import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRule;
 import com.google.gerrit.common.data.PermissionRule.Action;
+import com.google.gerrit.extensions.common.InheritableBoolean;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.RefNames;
-import com.google.gerrit.reviewdb.client.Project.InheritableBoolean;
 import com.google.gerrit.server.GerritPersonIdent;
 import com.google.gerrit.server.config.AllProjectsName;
 import com.google.gerrit.server.extensions.events.GitReferenceUpdated;
@@ -170,7 +170,7 @@ public class AllProjectsCreator {
     grant(config, meta, Permission.PUSH, admin, owners);
     grant(config, meta, Permission.SUBMIT, admin, owners);
 
-    config.commit(md);
+    config.commitToNewRef(md, RefNames.REFS_CONFIG);
   }
 
   private void grant(ProjectConfig config, AccessSection section,
@@ -215,7 +215,6 @@ public class AllProjectsCreator {
         new LabelValue((short) 0, "No score"),
         new LabelValue((short) -1, "I would prefer this is not merged as is"),
         new LabelValue((short) -2, "This shall not be merged")));
-    type.setAbbreviation("CR");
     type.setCopyMinScore(true);
     c.getLabelSections().put(type.getName(), type);
     return type;

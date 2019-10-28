@@ -28,19 +28,16 @@ import static com.google.gerrit.extensions.common.ListChangesOption.DRAFT_COMMEN
 import static com.google.gerrit.extensions.common.ListChangesOption.LABELS;
 import static com.google.gerrit.extensions.common.ListChangesOption.MESSAGES;
 import static com.google.gerrit.extensions.common.ListChangesOption.REVIEWED;
+import static com.google.gerrit.extensions.common.ListChangesOption.WEB_LINKS;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
 import com.google.common.base.Optional;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.LinkedHashMultimap;
-import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
@@ -59,6 +56,7 @@ import com.google.gerrit.extensions.common.FetchInfo;
 import com.google.gerrit.extensions.common.GitPerson;
 import com.google.gerrit.extensions.common.ListChangesOption;
 import com.google.gerrit.extensions.common.RevisionInfo;
+import com.google.gerrit.extensions.common.WebLinkInfo;
 import com.google.gerrit.extensions.config.DownloadCommand;
 import com.google.gerrit.extensions.config.DownloadScheme;
 import com.google.gerrit.extensions.registration.DynamicMap;
@@ -73,85 +71,64 @@ import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.PatchSetApproval;
 import com.google.gerrit.reviewdb.client.PatchSetInfo;
 import com.google.gerrit.reviewdb.client.PatchSetInfo.ParentInfo;
-import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.UserIdentity;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.AnonymousUser;
+import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.WebLinks;
 import com.google.gerrit.server.account.AccountInfo;
 import com.google.gerrit.server.extensions.webui.UiActions;
 import com.google.gerrit.server.git.LabelNormalizer;
+import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.patch.PatchListNotAvailableException;
 import com.google.gerrit.server.patch.PatchSetInfoFactory;
 import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
 import com.google.gerrit.server.project.ChangeControl;
-import com.google.gerrit.server.project.NoSuchChangeException;
-import com.google.gerrit.server.project.NoSuchProjectException;
 import com.google.gerrit.server.project.ProjectControl;
 import com.google.gerrit.server.query.change.ChangeData;
 import com.google.gerrit.server.query.change.ChangeData.ChangedLines;
 import com.google.gwtorm.server.OrmException;
-import com.google.gwtorm.server.ResultSet;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.sql.Timestamp;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.ExecutionException;
 
 public class ChangeJson {
   private static final Logger log = LoggerFactory.getLogger(ChangeJson.class);
-  private static final ResultSet<ChangeMessage> NO_MESSAGES =
-      new ResultSet<ChangeMessage>() {
-        @Override
-        public Iterator<ChangeMessage> iterator() {
-          return toList().iterator();
-        }
-
-        @Override
-        public List<ChangeMessage> toList() {
-          return Collections.emptyList();
-        }
-
-        @Override
-        public void close() {
-        }
-      };
+  private static final List<ChangeMessage> NO_MESSAGES =
+      ImmutableList.of();
 
   private final Provider<ReviewDb> db;
   private final LabelNormalizer labelNormalizer;
   private final Provider<CurrentUser> userProvider;
   private final AnonymousUser anonymous;
   private final IdentifiedUser.GenericFactory userFactory;
-  private final ProjectControl.GenericFactory projectControlFactory;
   private final ChangeData.Factory changeDataFactory;
   private final PatchSetInfoFactory patchSetInfoFactory;
-  private final ChangesCollection changes;
   private final FileInfoJson fileInfoJson;
   private final AccountInfo.Loader.Factory accountLoaderFactory;
   private final DynamicMap<DownloadScheme> downloadSchemes;
   private final DynamicMap<DownloadCommand> downloadCommands;
   private final DynamicMap<RestView<ChangeResource>> changeViews;
   private final Revisions revisions;
+  private final Provider<WebLinks> webLinks;
+  private final EnumSet<ListChangesOption> options;
+  private final ChangeMessagesUtil cmUtil;
 
-  private EnumSet<ListChangesOption> options;
   private AccountInfo.Loader accountLoader;
-  private ChangeControl lastControl;
-  private Set<Change.Id> reviewed;
-  private LoadingCache<Project.NameKey, ProjectControl> projectControls;
 
   @Inject
   ChangeJson(
@@ -163,39 +140,30 @@ public class ChangeJson {
       ProjectControl.GenericFactory pcf,
       ChangeData.Factory cdf,
       PatchSetInfoFactory psi,
-      ChangesCollection changes,
       FileInfoJson fileInfoJson,
       AccountInfo.Loader.Factory ailf,
       DynamicMap<DownloadScheme> downloadSchemes,
       DynamicMap<DownloadCommand> downloadCommands,
       DynamicMap<RestView<ChangeResource>> changeViews,
-      Revisions revisions) {
+      Revisions revisions,
+      Provider<WebLinks> webLinks,
+      ChangeMessagesUtil cmUtil) {
     this.db = db;
     this.labelNormalizer = ln;
     this.userProvider = user;
     this.anonymous = au;
     this.userFactory = uf;
-    this.projectControlFactory = pcf;
     this.changeDataFactory = cdf;
     this.patchSetInfoFactory = psi;
-    this.changes = changes;
     this.fileInfoJson = fileInfoJson;
     this.accountLoaderFactory = ailf;
     this.downloadSchemes = downloadSchemes;
     this.downloadCommands = downloadCommands;
     this.changeViews = changeViews;
     this.revisions = revisions;
-
+    this.webLinks = webLinks;
+    this.cmUtil = cmUtil;
     options = EnumSet.noneOf(ListChangesOption.class);
-    projectControls = CacheBuilder.newBuilder()
-      .concurrencyLevel(1)
-      .build(new CacheLoader<Project.NameKey, ProjectControl>() {
-        @Override
-        public ProjectControl load(Project.NameKey key)
-            throws NoSuchProjectException, IOException {
-          return projectControlFactory.controlFor(key, userProvider.get());
-        }
-      });
   }
 
   public ChangeJson addOption(ListChangesOption o) {
@@ -227,10 +195,11 @@ public class ChangeJson {
   private ChangeInfo format(ChangeData cd, Optional<PatchSet.Id> limitToPsId)
       throws OrmException {
     accountLoader = accountLoaderFactory.create(has(DETAILED_ACCOUNTS));
+    Set<Change.Id> reviewed = Sets.newHashSet();
     if (has(REVIEWED)) {
-      ensureReviewedLoaded(Collections.singleton(cd));
+      reviewed = loadReviewed(Collections.singleton(cd));
     }
-    ChangeInfo res = toChangeInfo(cd, limitToPsId);
+    ChangeInfo res = toChangeInfo(cd, reviewed, limitToPsId);
     accountLoader.fill();
     return res;
   }
@@ -250,15 +219,16 @@ public class ChangeJson {
     } else {
       ChangeData.ensureCurrentPatchSetLoaded(all);
     }
+    Set<Change.Id> reviewed = Sets.newHashSet();
     if (has(REVIEWED)) {
-      ensureReviewedLoaded(all);
+      reviewed = loadReviewed(all);
     }
     ChangeData.ensureCurrentApprovalsLoaded(all);
 
     List<List<ChangeInfo>> res = Lists.newArrayListWithCapacity(in.size());
     Map<Change.Id, ChangeInfo> out = Maps.newHashMap();
     for (List<ChangeData> changes : in) {
-      res.add(toChangeInfo(out, changes));
+      res.add(toChangeInfo(out, changes, reviewed));
     }
     accountLoader.fill();
     return res;
@@ -269,12 +239,18 @@ public class ChangeJson {
   }
 
   private List<ChangeInfo> toChangeInfo(Map<Change.Id, ChangeInfo> out,
-      List<ChangeData> changes) throws OrmException {
+      List<ChangeData> changes, Set<Change.Id> reviewed) throws OrmException {
     List<ChangeInfo> info = Lists.newArrayListWithCapacity(changes.size());
     for (ChangeData cd : changes) {
       ChangeInfo i = out.get(cd.getId());
       if (i == null) {
-        i = toChangeInfo(cd, Optional.<PatchSet.Id> absent());
+        try {
+          i = toChangeInfo(cd, reviewed, Optional.<PatchSet.Id> absent());
+        } catch (OrmException e) {
+          log.warn(
+              "Omitting corrupt change " + cd.getId() + " from results", e);
+          continue;
+        }
         out.put(cd.getId(), i);
       }
       info.add(i);
@@ -282,15 +258,16 @@ public class ChangeJson {
     return info;
   }
 
-  private ChangeInfo toChangeInfo(ChangeData cd,
+  private ChangeInfo toChangeInfo(ChangeData cd, Set<Change.Id> reviewed,
       Optional<PatchSet.Id> limitToPsId) throws OrmException {
+    ChangeControl ctl = cd.changeControl().forUser(userProvider.get());
     ChangeInfo out = new ChangeInfo();
     Change in = cd.change();
     out.project = in.getProject().get();
     out.branch = in.getDest().getShortName();
     out.topic = in.getTopic();
     out.changeId = in.getKey().get();
-    out.mergeable = in.getStatus() != Change.Status.MERGED ? in.isMergeable() : null;
+    out.mergeable = isMergeable(in);
     ChangedLines changedLines = cd.changedLines();
     if (changedLines != null) {
       out.insertions = changedLines.insertions;
@@ -309,26 +286,28 @@ public class ChangeJson {
     out.reviewed = in.getStatus().isOpen()
         && has(REVIEWED)
         && reviewed.contains(cd.getId()) ? true : null;
-    out.labels = labelsFor(cd, has(LABELS), has(DETAILED_LABELS));
+    out.labels = labelsFor(ctl, cd, has(LABELS), has(DETAILED_LABELS));
 
     if (out.labels != null && has(DETAILED_LABELS)) {
       // If limited to specific patch sets but not the current patch set, don't
       // list permitted labels, since users can't vote on those patch sets.
       if (!limitToPsId.isPresent()
           || limitToPsId.get().equals(in.currentPatchSetId())) {
-        out.permittedLabels = permittedLabels(cd);
+        out.permittedLabels = permittedLabels(ctl, cd);
       }
-      out.removableReviewers = removableReviewers(cd, out.labels.values());
+      out.removableReviewers = removableReviewers(ctl, cd, out.labels.values());
     }
+
+    Map<PatchSet.Id, PatchSet> src = loadPatchSets(cd, limitToPsId);
     if (has(MESSAGES)) {
-      out.messages = messages(cd);
+      out.messages = messages(ctl, cd, src);
     }
     out.finish();
 
     if (has(ALL_REVISIONS)
         || has(CURRENT_REVISION)
         || limitToPsId.isPresent()) {
-      out.revisions = revisions(cd, limitToPsId);
+      out.revisions = revisions(ctl, cd, limitToPsId, out.project, src);
       if (out.revisions != null) {
         for (Map.Entry<String, RevisionInfo> entry : out.revisions.entrySet()) {
           if (entry.getValue().isCurrent) {
@@ -343,40 +322,27 @@ public class ChangeJson {
       out.actions = Maps.newTreeMap();
       for (UiAction.Description d : UiActions.from(
           changeViews,
-          changes.parse(control(cd)),
+          new ChangeResource(ctl),
           userProvider)) {
         out.actions.put(d.getId(), new ActionInfo(d));
       }
     }
-    lastControl = null;
     return out;
   }
 
-  private ChangeControl control(ChangeData cd) throws OrmException {
-    if (lastControl != null
-        && cd.getId().equals(lastControl.getChange().getId())) {
-      return lastControl;
+  private Boolean isMergeable(Change c) {
+    if (c.getStatus() == Change.Status.MERGED
+        || c.getLastSha1MergeTested() == null) {
+      return null;
     }
-    ChangeControl ctrl;
-    try {
-      if (cd.hasChangeControl()) {
-        ctrl = cd.changeControl().forUser(userProvider.get());
-      } else {
-        ctrl = projectControls.get(cd.change().getProject())
-            .controlFor(cd.change());
-      }
-    } catch (NoSuchChangeException | ExecutionException e) {
-      throw new OrmException(e);
-    }
-    lastControl = ctrl;
-    return ctrl;
+    return c.isMergeable();
   }
 
-  private List<SubmitRecord> submitRecords(ChangeData cd) throws OrmException {
+  private List<SubmitRecord> submitRecords(ChangeControl ctl, ChangeData cd)
+      throws OrmException {
     if (cd.getSubmitRecords() != null) {
       return cd.getSubmitRecords();
     }
-    ChangeControl ctl = control(cd);
     if (ctl == null) {
       return ImmutableList.of();
     }
@@ -388,31 +354,30 @@ public class ChangeJson {
     return cd.getSubmitRecords();
   }
 
-  private Map<String, LabelInfo> labelsFor(ChangeData cd, boolean standard,
+  private Map<String, LabelInfo> labelsFor(ChangeControl ctl, ChangeData cd, boolean standard,
       boolean detailed) throws OrmException {
     if (!standard && !detailed) {
       return null;
     }
 
-    ChangeControl ctl = control(cd);
     if (ctl == null) {
       return null;
     }
 
     LabelTypes labelTypes = ctl.getLabelTypes();
     if (cd.change().getStatus().isOpen()) {
-      return labelsForOpenChange(cd, labelTypes, standard, detailed);
+      return labelsForOpenChange(ctl, cd, labelTypes, standard, detailed);
     } else {
       return labelsForClosedChange(cd, labelTypes, standard, detailed);
     }
   }
 
-  private Map<String, LabelInfo> labelsForOpenChange(ChangeData cd,
-      LabelTypes labelTypes, boolean standard, boolean detailed)
+  private Map<String, LabelInfo> labelsForOpenChange(ChangeControl ctl,
+      ChangeData cd, LabelTypes labelTypes, boolean standard, boolean detailed)
       throws OrmException {
-    Map<String, LabelInfo> labels = initLabels(cd, labelTypes, standard);
+    Map<String, LabelInfo> labels = initLabels(ctl, cd, labelTypes, standard);
     if (detailed) {
-      setAllApprovals(cd, labels);
+      setAllApprovals(ctl, cd, labels);
     }
     for (Map.Entry<String, LabelInfo> e : labels.entrySet()) {
       LabelType type = labelTypes.byLabel(e.getKey());
@@ -435,12 +400,11 @@ public class ChangeJson {
     return labels;
   }
 
-  private Map<String, LabelInfo> initLabels(ChangeData cd,
+  private Map<String, LabelInfo> initLabels(ChangeControl ctl, ChangeData cd,
       LabelTypes labelTypes, boolean standard) throws OrmException {
     // Don't use Maps.newTreeMap(Comparator) due to OpenJDK bug 100167.
-    Map<String, LabelInfo> labels =
-        new TreeMap<String, LabelInfo>(labelTypes.nameComparator());
-    for (SubmitRecord rec : submitRecords(cd)) {
+    Map<String, LabelInfo> labels = new TreeMap<>(labelTypes.nameComparator());
+    for (SubmitRecord rec : submitRecords(ctl, cd)) {
       if (rec.labels == null) {
         continue;
       }
@@ -498,29 +462,20 @@ public class ChangeJson {
     }
   }
 
-  private void setAllApprovals(ChangeData cd,
+  private void setAllApprovals(ChangeControl baseCtrl, ChangeData cd,
       Map<String, LabelInfo> labels) throws OrmException {
-    ChangeControl baseCtrl = control(cd);
-    if (baseCtrl == null) {
-      return;
-    }
-
-    // All users ever added, even if they can't vote on one or all labels.
+    // Include a user in the output for this label if either:
+    //  - They are an explicit reviewer.
+    //  - They ever voted on this change.
     Set<Account.Id> allUsers = Sets.newHashSet();
-    ListMultimap<PatchSet.Id, PatchSetApproval> allApprovals =
-        cd.approvals();
-    for (PatchSetApproval psa : allApprovals.values()) {
+    allUsers.addAll(cd.reviewers().values());
+    for (PatchSetApproval psa : cd.approvals().values()) {
       allUsers.add(psa.getAccountId());
     }
 
-    List<PatchSetApproval> currentList =
-        allApprovals.get(baseCtrl.getChange().currentPatchSetId());
-    // Most recent, normalized vote on each label for the current patch set by
-    // each user (may be 0).
     Table<Account.Id, String, PatchSetApproval> current = HashBasedTable.create(
         allUsers.size(), baseCtrl.getLabelTypes().getLabelTypes().size());
-    for (PatchSetApproval psa :
-        labelNormalizer.normalize(baseCtrl, currentList).getNormalized()) {
+    for (PatchSetApproval psa : cd.currentApprovals()) {
       current.put(psa.getAccountId(), psa.getLabel(), psa);
     }
 
@@ -541,9 +496,9 @@ public class ChangeJson {
           value = Integer.valueOf(psa.getValue());
           date = psa.getGranted();
         } else {
-          // Either the user cannot vote on this label, or there just wasn't a
-          // dummy approval for this label. Explicitly check whether the user
-          // can vote on this label.
+          // Either the user cannot vote on this label, or they were added as a
+          // reviewer but have not responded yet. Explicitly check whether the
+          // user can vote on this label.
           value = labelNormalizer.canVote(ctl, lt, accountId) ? 0 : null;
         }
         e.getValue().addApproval(approvalInfo(accountId, value, date));
@@ -559,22 +514,22 @@ public class ChangeJson {
       allUsers.add(psa.getAccountId());
     }
 
+    // We can only approximately reconstruct what the submit rule evaluator
+    // would have done. These should really come from a stored submit record.
     Set<String> labelNames = Sets.newHashSet();
     Multimap<Account.Id, PatchSetApproval> current = HashMultimap.create();
     for (PatchSetApproval a : cd.currentApprovals()) {
       LabelType type = labelTypes.byLabel(a.getLabelId());
-      if (type != null && a.getValue() != 0) {
+      if (type != null) {
         labelNames.add(type.getName());
+        // Not worth the effort to distinguish between votable/non-votable for 0
+        // values on closed changes, since they can't vote anyway.
         current.put(a.getAccountId(), a);
       }
     }
 
-    // We can only approximately reconstruct what the submit rule evaluator
-    // would have done. These should really come from a stored submit record.
-    //
     // Don't use Maps.newTreeMap(Comparator) due to OpenJDK bug 100167.
-    Map<String, LabelInfo> labels =
-        new TreeMap<String, LabelInfo>(labelTypes.nameComparator());
+    Map<String, LabelInfo> labels = new TreeMap<>(labelTypes.nameComparator());
     for (String name : labelNames) {
       LabelType type = labelTypes.byLabel(name);
       LabelInfo li = new LabelInfo();
@@ -632,6 +587,7 @@ public class ChangeJson {
   }
 
   private void setLabelValues(LabelType type, LabelInfo label) {
+    label.defaultValue = type.getDefaultValue();
     label.values = Maps.newLinkedHashMap();
     for (LabelValue v : type.getValues()) {
       label.values.put(v.formatValue(), v.getText());
@@ -641,16 +597,15 @@ public class ChangeJson {
     }
   }
 
-  private Map<String, Collection<String>> permittedLabels(ChangeData cd)
+  private Map<String, Collection<String>> permittedLabels(ChangeControl ctl, ChangeData cd)
       throws OrmException {
-    ChangeControl ctl = control(cd);
     if (ctl == null) {
       return null;
     }
 
     LabelTypes labelTypes = ctl.getLabelTypes();
     SetMultimap<String, String> permitted = LinkedHashMultimap.create();
-    for (SubmitRecord rec : submitRecords(cd)) {
+    for (SubmitRecord rec : submitRecords(ctl, cd)) {
       if (rec.labels == null) {
         continue;
       }
@@ -681,10 +636,10 @@ public class ChangeJson {
     return permitted.asMap();
   }
 
-  private Collection<ChangeMessageInfo> messages(ChangeData cd)
+  private Collection<ChangeMessageInfo> messages(ChangeControl ctl, ChangeData cd,
+      Map<PatchSet.Id, PatchSet> map)
       throws OrmException {
-    List<ChangeMessage> messages =
-        db.get().changeMessages().byChange(cd.getId()).toList();
+    List<ChangeMessage> messages = cmUtil.byChange(db.get(), cd.notes());
     if (messages.isEmpty()) {
       return Collections.emptyList();
     }
@@ -701,25 +656,22 @@ public class ChangeJson {
         Lists.newArrayListWithCapacity(messages.size());
     for (ChangeMessage message : messages) {
       PatchSet.Id patchNum = message.getPatchSetId();
-
-      ChangeMessageInfo cmi = new ChangeMessageInfo();
-      cmi.id = message.getKey().get();
-      cmi.author = accountLoader.get(message.getAuthor());
-      cmi.date = message.getWrittenOn();
-      cmi.message = message.getMessage();
-      cmi._revisionNumber = patchNum != null ? patchNum.get() : null;
-      result.add(cmi);
+      PatchSet ps = patchNum != null ? map.get(patchNum) : null;
+      if (patchNum == null || ctl.isPatchVisible(ps, db.get())) {
+        ChangeMessageInfo cmi = new ChangeMessageInfo();
+        cmi.id = message.getKey().get();
+        cmi.author = accountLoader.get(message.getAuthor());
+        cmi.date = message.getWrittenOn();
+        cmi.message = message.getMessage();
+        cmi._revisionNumber = patchNum != null ? patchNum.get() : null;
+        result.add(cmi);
+      }
     }
     return result;
   }
 
-  private Collection<AccountInfo> removableReviewers(ChangeData cd,
+  private Collection<AccountInfo> removableReviewers(ChangeControl ctl, ChangeData cd,
       Collection<LabelInfo> labels) throws OrmException {
-    ChangeControl ctl = control(cd);
-    if (ctl == null) {
-      return null;
-    }
-
     Set<Account.Id> fixed = Sets.newHashSetWithExpectedSize(labels.size());
     Set<Account.Id> removable = Sets.newHashSetWithExpectedSize(labels.size());
     for (LabelInfo label : labels) {
@@ -743,40 +695,37 @@ public class ChangeJson {
     return result;
   }
 
-  private void ensureReviewedLoaded(Iterable<ChangeData> all)
+  private Set<Change.Id> loadReviewed(Iterable<ChangeData> all)
       throws OrmException {
-    reviewed = Sets.newHashSet();
+    Set<Change.Id> reviewed = Sets.newHashSet();
     if (userProvider.get().isIdentifiedUser()) {
       Account.Id self = ((IdentifiedUser) userProvider.get()).getAccountId();
       for (List<ChangeData> batch : Iterables.partition(all, 50)) {
-        List<ResultSet<ChangeMessage>> m =
+        List<List<ChangeMessage>> m =
             Lists.newArrayListWithCapacity(batch.size());
         for (ChangeData cd : batch) {
           PatchSet.Id ps = cd.change().currentPatchSetId();
           if (ps != null && cd.change().getStatus().isOpen()) {
-            m.add(db.get().changeMessages().byPatchSet(ps));
+            m.add(cmUtil.byPatchSet(db.get(), cd.notes(), ps));
           } else {
             m.add(NO_MESSAGES);
           }
         }
         for (int i = 0; i < m.size(); i++) {
-          if (isChangeReviewed(self, batch.get(i), m.get(i).toList())) {
+          if (isChangeReviewed(self, batch.get(i), m.get(i))) {
             reviewed.add(batch.get(i).getId());
           }
         }
       }
     }
+    return reviewed;
   }
 
   private boolean isChangeReviewed(Account.Id self, ChangeData cd,
       List<ChangeMessage> msgs) throws OrmException {
     // Sort messages to keep the most recent ones at the beginning.
-    Collections.sort(msgs, new Comparator<ChangeMessage>() {
-      @Override
-      public int compare(ChangeMessage a, ChangeMessage b) {
-        return b.getWrittenOn().compareTo(a.getWrittenOn());
-      }
-    });
+    msgs = ChangeNotes.MESSAGE_BY_TIME.sortedCopy(msgs);
+    Collections.reverse(msgs);
 
     Account.Id changeOwnerId = cd.change().getOwner();
     for (ChangeMessage cm : msgs) {
@@ -789,15 +738,24 @@ public class ChangeJson {
     return false;
   }
 
-  private Map<String, RevisionInfo> revisions(ChangeData cd,
-      Optional<PatchSet.Id> limitToPsId) throws OrmException {
-    ChangeControl ctl = control(cd);
-    if (ctl == null) {
-      return null;
+  private Map<String, RevisionInfo> revisions(ChangeControl ctl, ChangeData cd,
+      Optional<PatchSet.Id> limitToPsId, String project,
+      Map<PatchSet.Id, PatchSet> map) throws OrmException {
+    Map<String, RevisionInfo> res = Maps.newLinkedHashMap();
+    for (PatchSet in : map.values()) {
+      if ((has(ALL_REVISIONS)
+          || in.getId().equals(cd.change().currentPatchSetId()))
+          && ctl.isPatchVisible(in, db.get())) {
+        res.put(in.getRevision().get(), toRevisionInfo(ctl, cd, in, project));
+      }
     }
+    return res;
+  }
 
+  private Map<PatchSet.Id, PatchSet> loadPatchSets(ChangeData cd,
+      Optional<PatchSet.Id> limitToPsId) throws OrmException {
     Collection<PatchSet> src;
-    if (has(ALL_REVISIONS)) {
+    if (has(ALL_REVISIONS) || has(MESSAGES)) {
       src = cd.patches();
     } else {
       PatchSet ps;
@@ -815,23 +773,20 @@ public class ChangeJson {
       }
       src = Collections.singletonList(ps);
     }
-
-    Map<String, RevisionInfo> res = Maps.newLinkedHashMap();
-    for (PatchSet in : src) {
-      if (ctl.isPatchVisible(in, db.get())) {
-        res.put(in.getRevision().get(), toRevisionInfo(cd, in));
-      }
+    Map<PatchSet.Id, PatchSet> map = Maps.newHashMapWithExpectedSize(src.size());
+    for (PatchSet patchSet : src) {
+      map.put(patchSet.getId(), patchSet);
     }
-    return res;
+    return map;
   }
 
-  private RevisionInfo toRevisionInfo(ChangeData cd, PatchSet in)
-      throws OrmException {
+  private RevisionInfo toRevisionInfo(ChangeControl ctl, ChangeData cd,
+      PatchSet in, String project) throws OrmException {
     RevisionInfo out = new RevisionInfo();
     out.isCurrent = in.getId().equals(cd.change().currentPatchSetId());
     out._number = in.getId().get();
     out.draft = in.isDraft() ? true : null;
-    out.fetch = makeFetchMap(cd, in);
+    out.fetch = makeFetchMap(ctl, cd, in);
 
     if (has(ALL_COMMITS) || (out.isCurrent && has(CURRENT_COMMIT))) {
       try {
@@ -856,7 +811,7 @@ public class ChangeJson {
       out.actions = Maps.newTreeMap();
       for (UiAction.Description d : UiActions.from(
           revisions,
-          new RevisionResource(changes.parse(control(cd)), in),
+          new RevisionResource(new ChangeResource(ctl), in),
           userProvider)) {
         out.actions.put(d.getId(), new ActionInfo(d));
       }
@@ -873,6 +828,13 @@ public class ChangeJson {
           : null;
     }
 
+    if (has(WEB_LINKS)) {
+      out.webLinks = Lists.newArrayList();
+      for (WebLinkInfo link : webLinks.get().getPatchSetLinks(
+          project, in.getRevision().get())) {
+        out.webLinks.add(link);
+      }
+    }
     return out;
   }
 
@@ -885,7 +847,6 @@ public class ChangeJson {
     commit.committer = toGitPerson(info.getCommitter());
     commit.subject = info.getSubject();
     commit.message = info.getMessage();
-
     for (ParentInfo parent : info.getParents()) {
       CommitInfo i = new CommitInfo();
       i.commit = parent.id.get();
@@ -895,7 +856,7 @@ public class ChangeJson {
     return commit;
   }
 
-  private Map<String, FetchInfo> makeFetchMap(ChangeData cd, PatchSet in)
+  private Map<String, FetchInfo> makeFetchMap(ChangeControl ctl, ChangeData cd, PatchSet in)
       throws OrmException {
     Map<String, FetchInfo> r = Maps.newLinkedHashMap();
 
@@ -907,7 +868,6 @@ public class ChangeJson {
         continue;
       }
 
-      ChangeControl ctl = control(cd);
       if (!scheme.isAuthSupported()
           && !ctl.forUser(anonymous).isPatchVisible(in, db.get())) {
         continue;
@@ -951,7 +911,6 @@ public class ChangeJson {
   }
 
   public static class ChangeInfo {
-    public final String kind = "gerritcodereview#change";
     public String id;
     public String project;
     public String branch;
@@ -1002,6 +961,7 @@ public class ChangeJson {
     public Map<String, String> values;
 
     public Short value;
+    public Short defaultValue;
     public Boolean optional;
     public Boolean blocking;
 

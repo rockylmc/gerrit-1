@@ -28,11 +28,13 @@ import com.google.common.collect.Lists;
 import com.google.common.hash.Hashing;
 import com.google.gerrit.common.Nullable;
 import com.google.gerrit.extensions.api.changes.ReviewInput;
+import com.google.gerrit.extensions.api.projects.ProjectInput;
 import com.google.gerrit.extensions.restapi.TopLevelResource;
 import com.google.gerrit.lifecycle.LifecycleManager;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Branch;
 import com.google.gerrit.reviewdb.client.Change;
+import com.google.gerrit.reviewdb.client.Patch;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.CurrentUser;
@@ -110,6 +112,9 @@ public abstract class AbstractQueryChangesTest {
     schemaCreator.create(db);
     userId = accountManager.authenticate(AuthRequest.forUser("user"))
         .getAccountId();
+    Account userAccount = db.accounts().get(userId);
+    userAccount.setPreferredEmail("user@example.com");
+    db.accounts().update(ImmutableList.of(userAccount));
     user = userFactory.create(userId);
 
     requestContext.setContext(new RequestContext() {
@@ -303,8 +308,27 @@ public abstract class AbstractQueryChangesTest {
     Change change2 = newChange(repo2, null, null, null, null).insert();
 
     assertTrue(query("project:foo").isEmpty());
+    assertTrue(query("project:repo").isEmpty());
     assertResultEquals(change1, queryOne("project:repo1"));
     assertResultEquals(change2, queryOne("project:repo2"));
+  }
+
+  @Test
+  public void byProjectPrefix() throws Exception {
+    TestRepository<InMemoryRepository> repo1 = createProject("repo1");
+    TestRepository<InMemoryRepository> repo2 = createProject("repo2");
+    Change change1 = newChange(repo1, null, null, null, null).insert();
+    Change change2 = newChange(repo2, null, null, null, null).insert();
+
+    assertTrue(query("projects:foo").isEmpty());
+    assertResultEquals(change1, queryOne("projects:repo1"));
+    assertResultEquals(change2, queryOne("projects:repo2"));
+
+    List<ChangeInfo> results;
+    results = query("projects:repo");
+    assertEquals(results.toString(), 2, results.size());
+    assertResultEquals(change2, results.get(0));
+    assertResultEquals(change1, results.get(1));
   }
 
   @Test
@@ -332,14 +356,18 @@ public abstract class AbstractQueryChangesTest {
     Change change1 = ins1.getChange();
     change1.setTopic("feature1");
     ins1.insert();
+
     ChangeInserter ins2 = newChange(repo, null, null, null, null);
     Change change2 = ins2.getChange();
     change2.setTopic("feature2");
     ins2.insert();
 
+    Change change3 = newChange(repo, null, null, null, null).insert();
+
     assertTrue(query("topic:foo").isEmpty());
     assertResultEquals(change1, queryOne("topic:feature1"));
     assertResultEquals(change2, queryOne("topic:feature2"));
+    assertResultEquals(change3, queryOne("topic:\"\""));
   }
 
   @Test
@@ -690,11 +718,11 @@ public abstract class AbstractQueryChangesTest {
 
     ReviewInput input = new ReviewInput();
     input.message = "toplevel";
-    ReviewInput.Comment comment = new ReviewInput.Comment();
+    ReviewInput.CommentInput comment = new ReviewInput.CommentInput();
     comment.line = 1;
     comment.message = "inline";
-    input.comments = ImmutableMap.<String, List<ReviewInput.Comment>> of(
-        "Foo.java", ImmutableList.<ReviewInput.Comment> of(comment));
+    input.comments = ImmutableMap.<String, List<ReviewInput.CommentInput>> of(
+        Patch.COMMIT_MSG, ImmutableList.<ReviewInput.CommentInput> of(comment));
     postReview.apply(new RevisionResource(
         changes.parse(change.getId()), ins.getPatchSet()), input);
 
@@ -785,6 +813,89 @@ public abstract class AbstractQueryChangesTest {
     assertResultEquals(change1, results.get(1));
   }
 
+  @Test
+  public void bySize() throws Exception {
+    TestRepository<InMemoryRepository> repo = createProject("repo");
+
+    // added = 3, deleted = 0, delta = 3
+    RevCommit commit1 = repo.parseBody(
+        repo.commit().add("file1", "foo\n\foo\nfoo").create());
+    // added = 0, deleted = 2, delta = 2
+    RevCommit commit2 = repo.parseBody(
+        repo.commit().parent(commit1).add("file1", "foo").create());
+
+    Change change1 = newChange(repo, commit1, null, null, null).insert();
+    Change change2 = newChange(repo, commit2, null, null, null).insert();
+
+    assertTrue(query("added:>4").isEmpty());
+    assertResultEquals(change1, queryOne("added:3"));
+    assertResultEquals(change1, queryOne("added:>2"));
+    assertResultEquals(change1, queryOne("added:>=3"));
+    assertResultEquals(change2, queryOne("added:<1"));
+    assertResultEquals(change2, queryOne("added:<=0"));
+
+    assertTrue(query("deleted:>3").isEmpty());
+    assertResultEquals(change2, queryOne("deleted:2"));
+    assertResultEquals(change2, queryOne("deleted:>1"));
+    assertResultEquals(change2, queryOne("deleted:>=2"));
+    assertResultEquals(change1, queryOne("deleted:<1"));
+    assertResultEquals(change1, queryOne("deleted:<=0"));
+
+    for (String str : Lists.newArrayList("delta", "size")) {
+      assertTrue(query(str + ":<2").isEmpty());
+      assertResultEquals(change1, queryOne(str + ":3"));
+      assertResultEquals(change1, queryOne(str + ":>2"));
+      assertResultEquals(change1, queryOne(str + ":>=3"));
+      assertResultEquals(change2, queryOne(str + ":<3"));
+      assertResultEquals(change2, queryOne(str + ":<=2"));
+    }
+  }
+
+  @Test
+  public void byDefault() throws Exception {
+    TestRepository<InMemoryRepository> repo = createProject("repo");
+
+    Change change1 = newChange(repo, null, null, null, null).insert();
+
+    RevCommit commit2 = repo.parseBody(
+        repo.commit().message("foosubject").create());
+    Change change2 = newChange(repo, commit2, null, null, null).insert();
+
+    RevCommit commit3 = repo.parseBody(
+        repo.commit()
+        .add("Foo.java", "foo contents")
+        .create());
+    Change change3 = newChange(repo, commit3, null, null, null).insert();
+
+    ChangeInserter ins4 = newChange(repo, null, null, null, null);
+    Change change4 = ins4.insert();
+    ReviewInput ri4 = new ReviewInput();
+    ri4.message = "toplevel";
+    ri4.labels = ImmutableMap.<String, Short> of("Code-Review", (short) 1);
+    postReview.apply(new RevisionResource(
+        changes.parse(change4.getId()), ins4.getPatchSet()), ri4);
+
+    ChangeInserter ins5 = newChange(repo, null, null, null, null);
+    Change change5 = ins5.getChange();
+    change5.setTopic("feature5");
+    ins5.insert();
+
+    Change change6 = newChange(repo, null, null, null, "branch6").insert();
+
+    assertResultEquals(change1,
+        queryOne(Integer.toString(change1.getId().get())));
+    assertResultEquals(change2, queryOne("foosubject"));
+    assertResultEquals(change3, queryOne("Foo.java"));
+    assertResultEquals(change4, queryOne("Code-Review+1"));
+    assertResultEquals(change4, queryOne("toplevel"));
+    assertResultEquals(change5, queryOne("feature5"));
+    assertResultEquals(change6, queryOne("branch6"));
+    assertResultEquals(change6, queryOne("refs/heads/branch6"));
+
+    assertEquals(6, query("user@example.com").size());
+    assertEquals(6, query("repo").size());
+  }
+
   protected ChangeInserter newChange(
       TestRepository<InMemoryRepository> repo,
       @Nullable RevCommit commit, @Nullable String key, @Nullable Integer owner,
@@ -833,7 +944,7 @@ public abstract class AbstractQueryChangesTest {
   protected TestRepository<InMemoryRepository> createProject(String name)
       throws Exception {
     CreateProject create = projectFactory.create(name);
-    create.apply(TLR, new CreateProject.Input());
+    create.apply(TLR, new ProjectInput());
     return new TestRepository<InMemoryRepository>(
         repoManager.openRepository(new Project.NameKey(name)));
   }

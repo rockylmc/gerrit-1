@@ -16,32 +16,43 @@ package com.google.gerrit.server.project;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.google.gerrit.extensions.common.ActionInfo;
+import com.google.gerrit.extensions.registration.DynamicMap;
 import com.google.gerrit.extensions.restapi.ResourceNotFoundException;
 import com.google.gerrit.extensions.restapi.RestReadView;
+import com.google.gerrit.extensions.restapi.RestView;
+import com.google.gerrit.extensions.webui.UiAction;
 import com.google.gerrit.reviewdb.client.RefNames;
+import com.google.gerrit.server.extensions.webui.UiActions;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.inject.Inject;
+import com.google.inject.Singleton;
+import com.google.inject.util.Providers;
 
 import org.eclipse.jgit.errors.RepositoryNotFoundException;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.Ref;
-import org.eclipse.jgit.lib.RefDatabase;
 import org.eclipse.jgit.lib.Repository;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
+@Singleton
 public class ListBranches implements RestReadView<ProjectResource> {
-
   private final GitRepositoryManager repoManager;
+  private final DynamicMap<RestView<BranchResource>> branchViews;
 
   @Inject
-  public ListBranches(GitRepositoryManager repoManager) {
+  public ListBranches(GitRepositoryManager repoManager,
+      DynamicMap<RestView<BranchResource>> branchViews) {
     this.repoManager = repoManager;
+    this.branchViews = branchViews;
   }
 
   @Override
@@ -61,30 +72,34 @@ public class ListBranches implements RestReadView<ProjectResource> {
     }
 
     try {
-      final Map<String, Ref> all = db.getRefDatabase().getRefs(RefDatabase.ALL);
+      List<Ref> refs =
+          new ArrayList<>(db.getRefDatabase().getRefs(Constants.R_HEADS)
+              .values());
 
-      if (!all.containsKey(Constants.HEAD)) {
-        // The branch pointed to by HEAD doesn't exist yet, so getAllRefs
-        // filtered it out. If we ask for it individually we can find the
-        // underlying target and put it into the map anyway.
-        //
         try {
           Ref head = db.getRef(Constants.HEAD);
           if (head != null) {
-            all.put(Constants.HEAD, head);
+            refs.add(head);
           }
         } catch (IOException e) {
           // Ignore the failure reading HEAD.
         }
-      }
+        try {
+          Ref config = db.getRef(RefNames.REFS_CONFIG);
+          if (config != null) {
+            refs.add(config);
+          }
+        } catch (IOException e) {
+          // Ignore the failure reading refs/meta/config.
+        }
 
-      for (final Ref ref : all.values()) {
+      for (Ref ref : refs) {
         if (ref.isSymbolic()) {
           targets.add(ref.getTarget().getName());
         }
       }
 
-      for (final Ref ref : all.values()) {
+      for (Ref ref : refs) {
         if (ref.isSymbolic()) {
           // A symbolic reference to another branch, instead of
           // showing the resolved value, show the name it references.
@@ -111,10 +126,10 @@ public class ListBranches implements RestReadView<ProjectResource> {
 
         final RefControl refControl = rsrc.getControl().controlForRef(ref.getName());
         if (refControl.isVisible()) {
-          if (ref.getName().startsWith(Constants.R_HEADS)) {
-            branches.add(createBranchInfo(ref, refControl, targets));
-          } else if (RefNames.REFS_CONFIG.equals(ref.getName())) {
+          if (RefNames.REFS_CONFIG.equals(ref.getName())) {
             configBranch = createBranchInfo(ref, refControl, targets);
+          } else {
+            branches.add(createBranchInfo(ref, refControl, targets));
           }
         }
       }
@@ -136,17 +151,28 @@ public class ListBranches implements RestReadView<ProjectResource> {
     return branches;
   }
 
-  private static BranchInfo createBranchInfo(Ref ref, RefControl refControl,
+  private BranchInfo createBranchInfo(Ref ref, RefControl refControl,
       Set<String> targets) {
-    return new BranchInfo(ref.getName(),
+    BranchInfo info = new BranchInfo(ref.getName(),
         ref.getObjectId() != null ? ref.getObjectId().name() : null,
         !targets.contains(ref.getName()) && refControl.canDelete());
+    for (UiAction.Description d : UiActions.from(
+        branchViews,
+        new BranchResource(refControl.getProjectControl(), info),
+        Providers.of(refControl.getCurrentUser()))) {
+      if (info.actions == null) {
+        info.actions = new TreeMap<>();
+      }
+      info.actions.put(d.getId(), new ActionInfo(d));
+    }
+    return info;
   }
 
   public static class BranchInfo {
     public String ref;
     public String revision;
     public Boolean canDelete;
+    public Map<String, ActionInfo> actions;
 
     public BranchInfo(String ref, String revision, boolean canDelete) {
       this.ref = ref;

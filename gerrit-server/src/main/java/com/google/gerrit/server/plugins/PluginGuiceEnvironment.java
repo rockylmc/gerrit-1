@@ -24,6 +24,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.gerrit.common.Nullable;
+import com.google.gerrit.extensions.annotations.RootRelative;
 import com.google.gerrit.extensions.events.LifecycleListener;
 import com.google.gerrit.extensions.registration.DynamicItem;
 import com.google.gerrit.extensions.registration.DynamicMap;
@@ -56,6 +57,8 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import javax.inject.Inject;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 /**
  * Tracks Guice bindings that should be exposed to loaded plugins.
@@ -72,6 +75,7 @@ public class PluginGuiceEnvironment {
   private final CopyConfigModule copyConfigModule;
   private final Set<Key<?>> copyConfigKeys;
   private final List<StartPluginListener> onStart;
+  private final List<StopPluginListener> onStop;
   private final List<ReloadPluginListener> onReload;
 
   private Module sysModule;
@@ -82,6 +86,8 @@ public class PluginGuiceEnvironment {
   private Provider<ModuleGenerator> httpGen;
 
   private Map<TypeLiteral<?>, DynamicItem<?>> sysItems;
+  private Map<TypeLiteral<?>, DynamicItem<?>> sshItems;
+  private Map<TypeLiteral<?>, DynamicItem<?>> httpItems;
 
   private Map<TypeLiteral<?>, DynamicSet<?>> sysSets;
   private Map<TypeLiteral<?>, DynamicSet<?>> sshSets;
@@ -103,10 +109,13 @@ public class PluginGuiceEnvironment {
     this.copyConfigModule = ccm;
     this.copyConfigKeys = Guice.createInjector(ccm).getAllBindings().keySet();
 
-    onStart = new CopyOnWriteArrayList<StartPluginListener>();
+    onStart = new CopyOnWriteArrayList<>();
     onStart.addAll(listeners(sysInjector, StartPluginListener.class));
 
-    onReload = new CopyOnWriteArrayList<ReloadPluginListener>();
+    onStop = new CopyOnWriteArrayList<>();
+    onStop.addAll(listeners(sysInjector, StopPluginListener.class));
+
+    onReload = new CopyOnWriteArrayList<>();
     onReload.addAll(listeners(sysInjector, ReloadPluginListener.class));
 
     sysItems = dynamicItemsOf(sysInjector);
@@ -119,7 +128,9 @@ public class PluginGuiceEnvironment {
   }
 
   boolean hasDynamicItem(TypeLiteral<?> type) {
-    return sysItems.containsKey(type);
+    return sysItems.containsKey(type)
+        || (sshItems != null && sshItems.containsKey(type))
+        || (httpItems != null && httpItems.containsKey(type));
   }
 
   boolean hasDynamicSet(TypeLiteral<?> type) {
@@ -154,9 +165,11 @@ public class PluginGuiceEnvironment {
   public void setSshInjector(Injector injector) {
     sshModule = copy(injector);
     sshGen = injector.getProvider(ModuleGenerator.class);
+    sshItems = dynamicItemsOf(injector);
     sshSets = dynamicSetsOf(injector);
     sshMaps = dynamicMapsOf(injector);
     onStart.addAll(listeners(injector, StartPluginListener.class));
+    onStop.addAll(listeners(injector, StopPluginListener.class));
     onReload.addAll(listeners(injector, ReloadPluginListener.class));
   }
 
@@ -175,9 +188,11 @@ public class PluginGuiceEnvironment {
   public void setHttpInjector(Injector injector) {
     httpModule = copy(injector);
     httpGen = injector.getProvider(ModuleGenerator.class);
+    httpItems = dynamicItemsOf(injector);
     httpSets = dynamicSetsOf(injector);
     httpMaps = dynamicMapsOf(injector);
     onStart.addAll(listeners(injector, StartPluginListener.class));
+    onStop.addAll(listeners(injector, StopPluginListener.class));
     onReload.addAll(listeners(injector, ReloadPluginListener.class));
   }
 
@@ -202,13 +217,11 @@ public class PluginGuiceEnvironment {
   }
 
   void onStartPlugin(Plugin plugin) {
-    for (StartPluginListener l : onStart) {
-      l.onStartPlugin(plugin);
-    }
-
     RequestContext oldContext = enter(plugin);
     try {
       attachItem(sysItems, plugin.getSysInjector(), plugin);
+      attachItem(sshItems, plugin.getSshInjector(), plugin);
+      attachItem(httpItems, plugin.getHttpInjector(), plugin);
 
       attachSet(sysSets, plugin.getSysInjector(), plugin);
       attachSet(sshSets, plugin.getSshInjector(), plugin);
@@ -219,6 +232,16 @@ public class PluginGuiceEnvironment {
       attachMap(httpMaps, plugin.getHttpInjector(), plugin);
     } finally {
       exit(oldContext);
+    }
+
+    for (StartPluginListener l : onStart) {
+      l.onStartPlugin(plugin);
+    }
+  }
+
+  void onStopPlugin(Plugin plugin) {
+    for (StopPluginListener l : onStop) {
+      l.onStopPlugin(plugin);
     }
   }
 
@@ -250,10 +273,6 @@ public class PluginGuiceEnvironment {
   }
 
   void onReloadPlugin(Plugin oldPlugin, Plugin newPlugin) {
-    for (ReloadPluginListener l : onReload) {
-      l.onReloadPlugin(oldPlugin, newPlugin);
-    }
-
     // Index all old registrations by the raw type. These may be replaced
     // during the reattach calls below. Any that are not replaced will be
     // removed when the old plugin does its stop routine.
@@ -274,8 +293,14 @@ public class PluginGuiceEnvironment {
       reattachSet(old, httpSets, newPlugin.getHttpInjector(), newPlugin);
 
       reattachItem(old, sysItems, newPlugin.getSysInjector(), newPlugin);
+      reattachItem(old, sshItems, newPlugin.getSshInjector(), newPlugin);
+      reattachItem(old, httpItems, newPlugin.getHttpInjector(), newPlugin);
     } finally {
       exit(oldContext);
+    }
+
+    for (ReloadPluginListener l : onReload) {
+      l.onReloadPlugin(oldPlugin, newPlugin);
     }
   }
 
@@ -459,9 +484,13 @@ public class PluginGuiceEnvironment {
 
   private Module copy(Injector src) {
     Set<TypeLiteral<?>> dynamicTypes = Sets.newHashSet();
+    Set<TypeLiteral<?>> dynamicItemTypes = Sets.newHashSet();
     for (Map.Entry<Key<?>, Binding<?>> e : src.getBindings().entrySet()) {
       TypeLiteral<?> type = e.getKey().getTypeLiteral();
-      if (type.getRawType() == DynamicSet.class
+      if (type.getRawType() == DynamicItem.class) {
+        ParameterizedType t = (ParameterizedType) type.getType();
+        dynamicItemTypes.add(TypeLiteral.get(t.getActualTypeArguments()[0]));
+      } else if (type.getRawType() == DynamicSet.class
           || type.getRawType() == DynamicMap.class) {
         ParameterizedType t = (ParameterizedType) type.getType();
         dynamicTypes.add(TypeLiteral.get(t.getActualTypeArguments()[0]));
@@ -478,12 +507,20 @@ public class PluginGuiceEnvironment {
         // using DynamicSet<F> or DynamicMap<F> internally. That should be
         // exported to plugins.
         continue;
+      } else if (dynamicItemTypes.contains(e.getKey().getTypeLiteral())) {
+        continue;
       } else if (shouldCopy(e.getKey())) {
         bindings.put(e.getKey(), e.getValue());
       }
     }
     bindings.remove(Key.get(Injector.class));
     bindings.remove(Key.get(java.util.logging.Logger.class));
+
+    final @Nullable Binding<HttpServletRequest> requestBinding =
+        src.getExistingBinding(Key.get(HttpServletRequest.class));
+
+    final @Nullable Binding<HttpServletResponse> responseBinding =
+        src.getExistingBinding(Key.get(HttpServletResponse.class));
 
     return new AbstractModule() {
       @SuppressWarnings("unchecked")
@@ -493,6 +530,17 @@ public class PluginGuiceEnvironment {
           Key<Object> k = (Key<Object>) e.getKey();
           Binding<Object> b = (Binding<Object>) e.getValue();
           bind(k).toProvider(b.getProvider());
+        }
+
+        if (requestBinding != null) {
+          bind(HttpServletRequest.class)
+              .annotatedWith(RootRelative.class)
+              .toProvider(requestBinding.getProvider());
+        }
+        if (responseBinding != null) {
+          bind(HttpServletResponse.class)
+              .annotatedWith(RootRelative.class)
+              .toProvider(responseBinding.getProvider());
         }
       }
     };
@@ -507,6 +555,9 @@ public class PluginGuiceEnvironment {
       return false;
     }
     if (StartPluginListener.class.isAssignableFrom(type)) {
+      return false;
+    }
+    if (StopPluginListener.class.isAssignableFrom(type)) {
       return false;
     }
 

@@ -46,7 +46,6 @@ import java.util.Iterator;
 import java.util.List;
 
 class DownloadBox extends VerticalPanel {
-  private final static String ARCHIVE[] = {"tar", "tbz2", "tgz", "txz"};
   private final ChangeInfo change;
   private final String revision;
   private final PatchSet.Id psId;
@@ -149,8 +148,13 @@ class DownloadBox extends VerticalPanel {
   }
 
   private void insertArchive() {
-    List<Anchor> formats = new ArrayList<>(ARCHIVE.length);
-    for (String f : ARCHIVE) {
+    List<String> activated = Gerrit.getConfig().getArchiveFormats();
+    if (activated.isEmpty()) {
+      return;
+    }
+
+    List<Anchor> anchors = new ArrayList<>(activated.size());
+    for (String f : activated) {
       Anchor archive = new Anchor(f);
       archive.setHref(new RestApi("/changes/")
           .id(psId.getParentKey().get())
@@ -159,11 +163,11 @@ class DownloadBox extends VerticalPanel {
           .view("archive")
           .addParameter("format", f)
           .url());
-      formats.add(archive);
+      anchors.add(archive);
     }
 
     HorizontalPanel p = new HorizontalPanel();
-    Iterator<Anchor> it = formats.iterator();
+    Iterator<Anchor> it = anchors.iterator();
     while (it.hasNext()) {
       Anchor a = it.next();
       p.add(a);

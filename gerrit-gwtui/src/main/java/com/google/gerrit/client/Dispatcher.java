@@ -21,6 +21,7 @@ import static com.google.gerrit.common.PageLinks.ADMIN_PLUGINS;
 import static com.google.gerrit.common.PageLinks.ADMIN_PROJECTS;
 import static com.google.gerrit.common.PageLinks.DASHBOARDS;
 import static com.google.gerrit.common.PageLinks.MINE;
+import static com.google.gerrit.common.PageLinks.MY_GROUPS;
 import static com.google.gerrit.common.PageLinks.PROJECTS;
 import static com.google.gerrit.common.PageLinks.QUERY;
 import static com.google.gerrit.common.PageLinks.REGISTER;
@@ -55,6 +56,7 @@ import com.google.gerrit.client.admin.AccountGroupScreen;
 import com.google.gerrit.client.admin.CreateGroupScreen;
 import com.google.gerrit.client.admin.CreateProjectScreen;
 import com.google.gerrit.client.admin.GroupListScreen;
+import com.google.gerrit.client.admin.MyGroupsListScreen;
 import com.google.gerrit.client.admin.PluginListScreen;
 import com.google.gerrit.client.admin.ProjectAccessScreen;
 import com.google.gerrit.client.admin.ProjectBranchesScreen;
@@ -233,7 +235,12 @@ public class Dispatcher {
       extension(token);
 
     } else if (matchExact(MINE, token)) {
-      Gerrit.display(token, mine(token));
+      String defaultScreenToken = Gerrit.getDefaultScreenToken();
+      if (defaultScreenToken != null && !MINE.equals(defaultScreenToken)) {
+        select(defaultScreenToken);
+      } else {
+        Gerrit.display(token, mine(token));
+      }
 
     } else if (matchPrefix("/dashboard/", token)) {
       dashboard(token);
@@ -252,6 +259,9 @@ public class Dispatcher {
 
     } else if (matchPrefix("/admin/", token)) {
       admin(token);
+
+    } else if (matchExact(MY_GROUPS, token)) {
+      Gerrit.display(token, new MyGroupsListScreen());
 
     } else if (/* DEPRECATED URL */matchPrefix("/c2/", token)) {
       changeScreen2 = true;
@@ -437,6 +447,17 @@ public class Dispatcher {
     String rest = skip(token);
     if (rest.matches("[0-9]+")) {
       Gerrit.display(token, new AccountDashboardScreen(Account.Id.parse(rest)));
+      return;
+    }
+
+    if (rest.equals("self")) {
+      if (Gerrit.isSignedIn()) {
+        Gerrit.display(token, new AccountDashboardScreen(Gerrit.getUserAccount().getId()));
+      } else {
+        Screen s = new AccountDashboardScreen(null);
+        s.setRequiresSignIn(true);
+        Gerrit.display(token, s);
+      }
       return;
     }
 

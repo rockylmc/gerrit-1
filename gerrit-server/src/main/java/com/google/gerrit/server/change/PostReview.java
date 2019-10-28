@@ -20,6 +20,7 @@ import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.CheckedFuture;
 import com.google.common.util.concurrent.Futures;
 import com.google.gerrit.common.ChangeHooks;
@@ -28,10 +29,10 @@ import com.google.gerrit.common.data.LabelTypes;
 import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRange;
 import com.google.gerrit.extensions.api.changes.ReviewInput;
-import com.google.gerrit.extensions.api.changes.ReviewInput.Comment;
+import com.google.gerrit.extensions.api.changes.ReviewInput.CommentInput;
 import com.google.gerrit.extensions.api.changes.ReviewInput.DraftHandling;
 import com.google.gerrit.extensions.api.changes.ReviewInput.NotifyHandling;
-import com.google.gerrit.extensions.api.changes.ReviewInput.Side;
+import com.google.gerrit.extensions.common.Comment.Side;
 import com.google.gerrit.extensions.restapi.AuthException;
 import com.google.gerrit.extensions.restapi.BadRequestException;
 import com.google.gerrit.extensions.restapi.RestModifyView;
@@ -43,20 +44,28 @@ import com.google.gerrit.reviewdb.client.CommentRange;
 import com.google.gerrit.reviewdb.client.Patch;
 import com.google.gerrit.reviewdb.client.PatchLineComment;
 import com.google.gerrit.reviewdb.client.PatchSetApproval;
+import com.google.gerrit.reviewdb.client.RevId;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
+import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.IdentifiedUser;
+import com.google.gerrit.server.PatchLineCommentsUtil;
 import com.google.gerrit.server.account.AccountsCollection;
 import com.google.gerrit.server.index.ChangeIndexer;
 import com.google.gerrit.server.notedb.ChangeUpdate;
+import com.google.gerrit.server.patch.PatchList;
+import com.google.gerrit.server.patch.PatchListCache;
+import com.google.gerrit.server.patch.PatchListNotAvailableException;
 import com.google.gerrit.server.project.ChangeControl;
+import com.google.gerrit.server.query.change.ChangeData;
 import com.google.gerrit.server.util.LabelVote;
 import com.google.gerrit.server.util.TimeUtil;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 
+import org.eclipse.jgit.lib.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,6 +75,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class PostReview implements RestModifyView<RevisionResource, ReviewInput> {
   private static final Logger log = LoggerFactory.getLogger(PostReview.class);
@@ -76,8 +86,12 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
 
   private final Provider<ReviewDb> db;
   private final ChangesCollection changes;
+  private final ChangeData.Factory changeDataFactory;
   private final ChangeUpdate.Factory updateFactory;
   private final ApprovalsUtil approvalsUtil;
+  private final ChangeMessagesUtil cmUtil;
+  private final PatchLineCommentsUtil plcUtil;
+  private final PatchListCache patchListCache;
   private final ChangeIndexer indexer;
   private final AccountsCollection accounts;
   private final EmailReviewComments.Factory email;
@@ -93,16 +107,24 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
   @Inject
   PostReview(Provider<ReviewDb> db,
       ChangesCollection changes,
+      ChangeData.Factory changeDataFactory,
       ChangeUpdate.Factory updateFactory,
       ApprovalsUtil approvalsUtil,
+      ChangeMessagesUtil cmUtil,
+      PatchLineCommentsUtil plcUtil,
+      PatchListCache patchListCache,
       ChangeIndexer indexer,
       AccountsCollection accounts,
       EmailReviewComments.Factory email,
       ChangeHooks hooks) {
     this.db = db;
     this.changes = changes;
+    this.changeDataFactory = changeDataFactory;
     this.updateFactory = updateFactory;
+    this.plcUtil = plcUtil;
+    this.patchListCache = patchListCache;
     this.approvalsUtil = approvalsUtil;
+    this.cmUtil = cmUtil;
     this.indexer = indexer;
     this.accounts = accounts;
     this.email = email;
@@ -120,7 +142,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
       checkLabels(revision, input.strictLabels, input.labels);
     }
     if (input.comments != null) {
-      checkComments(input.comments);
+      checkComments(revision, input.comments);
     }
     if (input.notify == null) {
       log.warn("notify = null; assuming notify = NONE");
@@ -136,9 +158,10 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
       timestamp = change.getLastUpdatedOn();
 
       update = updateFactory.create(revision.getControl(), timestamp);
-      dirty |= insertComments(revision, input.comments, input.drafts);
+      update.setPatchSetId(revision.getPatchSet().getId());
+      dirty |= insertComments(revision, update, input.comments, input.drafts);
       dirty |= updateLabels(revision, update, input.labels);
-      dirty |= insertMessage(revision, input.message);
+      dirty |= insertMessage(revision, input.message, update);
       if (dirty) {
         db.get().changes().update(Collections.singleton(change));
         db.get().commit();
@@ -266,22 +289,32 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
     }
   }
 
-  private void checkComments(Map<String, List<Comment>> in)
-      throws BadRequestException {
-    Iterator<Map.Entry<String, List<Comment>>> mapItr =
+  private void checkComments(RevisionResource revision, Map<String, List<CommentInput>> in)
+      throws BadRequestException, OrmException {
+    Iterator<Map.Entry<String, List<CommentInput>>> mapItr =
         in.entrySet().iterator();
+    Set<String> filePaths =
+        Sets.newHashSet(changeDataFactory.create(
+            db.get(), revision.getChange()).filePaths(
+                revision.getPatchSet()));
     while (mapItr.hasNext()) {
-      Map.Entry<String, List<Comment>> ent = mapItr.next();
+      Map.Entry<String, List<CommentInput>> ent = mapItr.next();
       String path = ent.getKey();
-      List<Comment> list = ent.getValue();
+      if (!filePaths.contains(path) && !Patch.COMMIT_MSG.equals(path)) {
+        throw new BadRequestException(String.format(
+            "file %s not found in revision %s",
+            path, revision.getChange().currentPatchSetId()));
+      }
+
+      List<CommentInput> list = ent.getValue();
       if (list == null) {
         mapItr.remove();
         continue;
       }
 
-      Iterator<Comment> listItr = list.iterator();
+      Iterator<CommentInput> listItr = list.iterator();
       while (listItr.hasNext()) {
-        Comment c = listItr.next();
+        CommentInput c = listItr.next();
         if (c == null) {
           listItr.remove();
           continue;
@@ -303,8 +336,8 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
   }
 
   private boolean insertComments(RevisionResource rsrc,
-      Map<String, List<Comment>> in, DraftHandling draftsHandling)
-      throws OrmException {
+      ChangeUpdate update, Map<String, List<CommentInput>> in, DraftHandling draftsHandling)
+      throws OrmException, IOException {
     if (in == null) {
       in = Collections.emptyMap();
     }
@@ -317,9 +350,18 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
     List<PatchLineComment> del = Lists.newArrayList();
     List<PatchLineComment> ups = Lists.newArrayList();
 
-    for (Map.Entry<String, List<Comment>> ent : in.entrySet()) {
+    PatchList patchList = null;
+    try {
+      patchList = patchListCache.get(rsrc.getChange(), rsrc.getPatchSet());
+    } catch (PatchListNotAvailableException e) {
+      throw new OrmException("could not load PatchList for this patchset", e);
+    }
+    RevId patchSetCommit = new RevId(ObjectId.toString(patchList.getNewId()));
+    RevId baseCommit = new RevId(ObjectId.toString(patchList.getOldId()));;
+
+    for (Map.Entry<String, List<CommentInput>> ent : in.entrySet()) {
       String path = ent.getKey();
-      for (Comment c : ent.getValue()) {
+      for (CommentInput c : ent.getValue()) {
         String parent = Url.decode(c.inReplyTo);
         PatchLineComment e = drafts.remove(Url.decode(c.id));
         if (e == null) {
@@ -336,6 +378,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
         e.setStatus(PatchLineComment.Status.PUBLISHED);
         e.setWrittenOn(timestamp);
         e.setSide(c.side == Side.PARENT ? (short) 0 : (short) 1);
+        e.setRevId(c.side == Side.PARENT ? baseCommit : patchSetCommit);
         e.setMessage(c.message);
         if (c.range != null) {
           e.setRange(new CommentRange(
@@ -360,12 +403,13 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
         for (PatchLineComment e : drafts.values()) {
           e.setStatus(PatchLineComment.Status.PUBLISHED);
           e.setWrittenOn(timestamp);
+          e.setRevId(e.getSide() == (short) 0 ? baseCommit : patchSetCommit);
           ups.add(e);
         }
         break;
     }
     db.get().patchComments().delete(del);
-    db.get().patchComments().upsert(ups);
+    plcUtil.addPublishedComments(db.get(), update, ups);
     comments.addAll(ups);
     return !del.isEmpty() || !ups.isEmpty();
   }
@@ -474,7 +518,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
     Map<String, PatchSetApproval> current = Maps.newHashMap();
 
     for (PatchSetApproval a : approvalsUtil.byPatchSetUser(
-        db.get(), rsrc.getNotes(), rsrc.getPatchSet().getId(),
+        db.get(), rsrc.getControl(), rsrc.getPatchSet().getId(),
         rsrc.getAccountId())) {
       if (a.isSubmit()) {
         continue;
@@ -494,8 +538,8 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
     labelDelta.add(new LabelVote(name, value).format());
   }
 
-  private boolean insertMessage(RevisionResource rsrc, String msg)
-      throws OrmException {
+  private boolean insertMessage(RevisionResource rsrc, String msg,
+      ChangeUpdate update) throws OrmException {
     msg = Strings.nullToEmpty(msg).trim();
 
     StringBuilder buf = new StringBuilder();
@@ -523,7 +567,7 @@ public class PostReview implements RestModifyView<RevisionResource, ReviewInput>
         "Patch Set %d:%s",
         rsrc.getPatchSet().getPatchSetId(),
         buf.toString()));
-    db.get().changeMessages().insert(Collections.singleton(message));
+    cmUtil.addChangeMessage(db.get(), update, message);
     return true;
   }
 

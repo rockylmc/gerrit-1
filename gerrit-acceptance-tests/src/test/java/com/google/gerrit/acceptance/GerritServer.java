@@ -98,7 +98,7 @@ public class GerritServer {
     }
 
     Injector i = createTestInjector(daemon);
-    return new GerritServer(site, i, daemon, daemonService);
+    return new GerritServer(i, daemon, daemonService);
   }
 
   private static File initSite(Config base) throws Exception {
@@ -130,6 +130,7 @@ public class GerritServer {
     cfg.setString("httpd", null, "listenUrl", url);
     cfg.setString("sshd", null, "listenAddress", forceEphemeralPort);
     cfg.setString("cache", null, "directory", null);
+    cfg.setString("gerrit", null, "basePath", "git");
     cfg.setBoolean("sendemail", null, "enable", false);
     cfg.setInt("cache", "projects", "checkFrequency", 0);
     cfg.setInt("plugins", null, "checkFrequency", 0);
@@ -159,7 +160,6 @@ public class GerritServer {
     return InetAddress.getLoopbackAddress();
   }
 
-  private File sitePath;
   private Daemon daemon;
   private ExecutorService daemonService;
   private Injector testInjector;
@@ -167,9 +167,8 @@ public class GerritServer {
   private InetSocketAddress sshdAddress;
   private InetSocketAddress httpAddress;
 
-  private GerritServer(File sitePath, Injector testInjector, Daemon daemon,
+  private GerritServer(Injector testInjector, Daemon daemon,
       ExecutorService daemonService) throws IOException, ConfigInvalidException {
-    this.sitePath = sitePath;
     this.testInjector = testInjector;
     this.daemon = daemon;
     this.daemonService = daemonService;
@@ -207,9 +206,6 @@ public class GerritServer {
       System.out.println("Gerrit Server Shutdown");
       daemonService.shutdownNow();
       daemonService.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
-    }
-    if (sitePath != null) {
-      TempFileUtil.recursivelyDelete(sitePath);
     }
     RepositoryCache.clear();
   }

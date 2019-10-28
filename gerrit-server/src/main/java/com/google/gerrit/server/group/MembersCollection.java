@@ -31,22 +31,24 @@ import com.google.gerrit.server.group.AddMembers.PutMember;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
+@Singleton
 public class MembersCollection implements
     ChildCollection<GroupResource, MemberResource>,
     AcceptsCreate<GroupResource> {
   private final DynamicMap<RestView<MemberResource>> views;
   private final Provider<ListMembers> list;
-  private final Provider<AccountsCollection> accounts;
+  private final AccountsCollection accounts;
   private final Provider<ReviewDb> db;
-  private final Provider<AddMembers> put;
+  private final AddMembers put;
 
   @Inject
   MembersCollection(DynamicMap<RestView<MemberResource>> views,
       Provider<ListMembers> list,
-      Provider<AccountsCollection> accounts,
+      AccountsCollection accounts,
       Provider<ReviewDb> db,
-      Provider<AddMembers> put) {
+      AddMembers put) {
     this.views = views;
     this.list = list;
     this.accounts = accounts;
@@ -68,7 +70,7 @@ public class MembersCollection implements
       throw new MethodNotAllowedException();
     }
 
-    IdentifiedUser user = accounts.get().parse(TopLevelResource.INSTANCE, id).getUser();
+    IdentifiedUser user = accounts.parse(TopLevelResource.INSTANCE, id).getUser();
     AccountGroupMember.Key key =
         new AccountGroupMember.Key(user.getAccountId(), parent.toAccountGroup().getId());
     if (db.get().accountGroupMembers().get(key) != null

@@ -18,6 +18,7 @@ import static javax.servlet.http.HttpServletResponse.SC_UNAUTHORIZED;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
+import com.google.gerrit.extensions.registration.DynamicItem;
 import com.google.gerrit.server.AccessPath;
 import com.google.gerrit.server.account.AccountCache;
 import com.google.gerrit.server.account.AccountException;
@@ -28,7 +29,6 @@ import com.google.gerrit.server.account.AuthResult;
 import com.google.gerrit.server.auth.NoSuchUserException;
 import com.google.gerrit.server.config.AuthConfig;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 import com.google.inject.Singleton;
 
 import org.apache.commons.codec.binary.Base64;
@@ -68,13 +68,13 @@ class ProjectBasicAuthFilter implements Filter {
   private static final String AUTHORIZATION = "Authorization";
   private static final String LIT_BASIC = "Basic ";
 
-  private final Provider<WebSession> session;
+  private final DynamicItem<WebSession> session;
   private final AccountCache accountCache;
   private final AccountManager accountManager;
   private final AuthConfig authConfig;
 
   @Inject
-  ProjectBasicAuthFilter(Provider<WebSession> session,
+  ProjectBasicAuthFilter(DynamicItem<WebSession> session,
       AccountCache accountCache, AccountManager accountManager,
       AuthConfig authConfig) {
     this.session = session;
@@ -138,6 +138,14 @@ class ProjectBasicAuthFilter implements Filter {
       return false;
     }
 
+    if (!authConfig.isLdapAuthType()
+        && !passwordMatchesTheUserGeneratedOne(who, username, password)) {
+      log.warn("Authentication failed for " + username
+          + ": password does not match the one stored in Gerrit");
+      rsp.sendError(SC_UNAUTHORIZED);
+      return false;
+    }
+
     AuthRequest whoAuth = AuthRequest.forUser(username);
     whoAuth.setPassword(password);
 
@@ -165,6 +173,13 @@ class ProjectBasicAuthFilter implements Filter {
       rsp.sendError(SC_UNAUTHORIZED);
       return false;
     }
+  }
+
+  private boolean passwordMatchesTheUserGeneratedOne(AccountState who,
+      String username, String password) {
+    String accountPassword = who.getPassword(username);
+    return accountPassword != null && password != null
+        && accountPassword.equals(password);
   }
 
   private String encoding(HttpServletRequest req) {

@@ -1,13 +1,11 @@
-GWT_COMPILER_OPTS = [
-  '-strict',
-  '-style', 'OBF',
-  '-optimize', '9',
+GWT_JVM_ARGS = ['-Xmx512m']
+
+GWT_COMPILER_ARGS = [
   '-XdisableClassMetadata',
   '-XdisableCastChecking',
 ]
 
 GWT_PLUGIN_DEPS = [
-  '//gerrit-gwtui-common:client',
   '//gerrit-plugin-gwtui:gwtui-api-lib',
   '//lib/gwt:user',
 ]

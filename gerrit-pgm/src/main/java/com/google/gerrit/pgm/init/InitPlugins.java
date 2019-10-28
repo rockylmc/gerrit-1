@@ -15,9 +15,10 @@
 package com.google.gerrit.pgm.init;
 
 import com.google.common.collect.Lists;
+import com.google.gerrit.common.PluginData;
 import com.google.gerrit.pgm.util.ConsoleUI;
 import com.google.gerrit.server.config.SitePaths;
-import com.google.gerrit.server.plugins.PluginLoader;
+import com.google.gerrit.server.plugins.JarPluginProvider;
 import com.google.inject.Inject;
 import com.google.inject.Injector;
 import com.google.inject.Singleton;
@@ -34,18 +35,6 @@ import java.util.jar.Manifest;
 public class InitPlugins implements InitStep {
   public static final String PLUGIN_DIR = "WEB-INF/plugins/";
   public static final String JAR = ".jar";
-
-  public static class PluginData {
-    public final String name;
-    public final String version;
-    public final File pluginFile;
-
-    private PluginData(String name, String version, File pluginFile) {
-      this.name = name;
-      this.version = version;
-      this.pluginFile = pluginFile;
-    }
-  }
 
   public static List<PluginData> listPlugins(SitePaths site,
       PluginsDistribution pluginsDistribution) throws IOException {
@@ -64,7 +53,7 @@ public class InitPlugins implements InitStep {
     pluginsDistribution.foreach(new PluginsDistribution.Processor() {
       @Override
       public void process(String pluginName, InputStream in) throws IOException {
-        File tmpPlugin = PluginLoader.storeInTemp(pluginName, in, site);
+        File tmpPlugin = JarPluginProvider.storeInTemp(pluginName, in, site);
         String pluginVersion = getVersion(tmpPlugin);
         if (deleteTempPluginFile) {
           tmpPlugin.delete();

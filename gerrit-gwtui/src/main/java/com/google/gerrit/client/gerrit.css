@@ -547,6 +547,10 @@ a:hover {
   height: 20px;
 }
 
+.changeTable .dataCellHidden {
+  display: none;
+}
+
 .changeTable a.gwt-InlineHyperlink,
 .changeTable a.gwt-Anchor {
   color: #222 !important;
@@ -632,6 +636,10 @@ a:hover {
   font-style: italic;
   white-space: nowrap;
   color: textColor;
+}
+
+.changeTable .dataHeaderHidden {
+  display: none;
 }
 
 .changeTable .sectionHeader {
@@ -1629,4 +1637,14 @@ a:hover.downloadLink {
 .pluginProjectConfigInheritedValue {
   padding-top: 5px;
   padding-left: 5px;
+}
+
+/* StringListPanel */
+.stringListPanelButtons {
+  margin-left: 0.5em;
+}
+.stringListPanelButtons .gwt-Button {
+  margin-right: 2em;
+  font-size: 7pt;
+  padding: 1px;
 }

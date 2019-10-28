@@ -14,9 +14,11 @@
 
 package com.google.gerrit.client.change;
 
+import com.google.gerrit.client.AvatarImage;
 import com.google.gerrit.client.ErrorDialog;
 import com.google.gerrit.client.FormatUtil;
 import com.google.gerrit.client.Gerrit;
+import com.google.gerrit.client.account.AccountInfo.AvatarInfo;
 import com.google.gerrit.client.actions.ActionInfo;
 import com.google.gerrit.client.api.ChangeGlue;
 import com.google.gerrit.client.changes.ChangeApi;
@@ -49,11 +51,10 @@ import com.google.gerrit.client.ui.Screen;
 import com.google.gerrit.client.ui.UserActivityMonitor;
 import com.google.gerrit.common.PageLinks;
 import com.google.gerrit.extensions.common.ListChangesOption;
+import com.google.gerrit.extensions.common.SubmitType;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.Change.Status;
 import com.google.gerrit.reviewdb.client.PatchSet;
-import com.google.gerrit.reviewdb.client.Project;
-import com.google.gerrit.reviewdb.client.Project.SubmitType;
 import com.google.gwt.core.client.GWT;
 import com.google.gwt.core.client.JsArray;
 import com.google.gwt.core.client.JsArrayString;
@@ -77,6 +78,7 @@ import com.google.gwt.user.client.EventListener;
 import com.google.gwt.user.client.rpc.AsyncCallback;
 import com.google.gwt.user.client.ui.Anchor;
 import com.google.gwt.user.client.ui.Button;
+import com.google.gwt.user.client.ui.FlowPanel;
 import com.google.gwt.user.client.ui.HTMLPanel;
 import com.google.gwt.user.client.ui.Image;
 import com.google.gwt.user.client.ui.ListBox;
@@ -140,6 +142,7 @@ public class ChangeScreen2 extends Screen {
 
   @UiField Element ccText;
   @UiField Reviewers reviewers;
+  @UiField FlowPanel ownerPanel;
   @UiField InlineHyperlink ownerLink;
   @UiField Element statusText;
   @UiField Image projectSettings;
@@ -206,7 +209,8 @@ public class ChangeScreen2 extends Screen {
     RestApi call = ChangeApi.detail(changeId.get());
     ChangeList.addOptions(call, EnumSet.of(
       ListChangesOption.CURRENT_ACTIONS,
-      ListChangesOption.ALL_REVISIONS));
+      ListChangesOption.ALL_REVISIONS,
+      ListChangesOption.WEB_LINKS));
     if (!fg) {
       call.background();
     }
@@ -800,7 +804,7 @@ public class ChangeScreen2 extends Screen {
     if (Gerrit.isSignedIn()) {
       initEditMessageAction(info, revision);
       replyAction = new ReplyAction(info, revision,
-          style, commentLinkProcessor, reply);
+          style, commentLinkProcessor, reply, quickApprove);
       if (topic.canEdit()) {
         keysAction.add(new KeyCommand(0, 't', Util.C.keyEditTopic()) {
           @Override
@@ -835,6 +839,9 @@ public class ChangeScreen2 extends Screen {
         ? info.owner().name()
         : Gerrit.getConfig().getAnonymousCowardName();
 
+    if (info.owner().avatar(AvatarInfo.DEFAULT_SIZE) != null) {
+      ownerPanel.insert(new AvatarImage(info.owner()), 0);
+    }
     ownerLink.setText(name);
     ownerLink.setTitle(info.owner().email() != null
         ? info.owner().email()
@@ -849,7 +856,7 @@ public class ChangeScreen2 extends Screen {
 
   private void renderSubmitType(String action) {
     try {
-      SubmitType type = Project.SubmitType.valueOf(action);
+      SubmitType type = SubmitType.valueOf(action);
       submitActionText.setInnerText(
           com.google.gerrit.client.admin.Util.toLongString(type));
     } catch (IllegalArgumentException e) {

@@ -16,12 +16,16 @@
 package com.google.gerrit.server.patch;
 
 import com.google.common.base.Function;
+import com.google.common.base.Throwables;
 import com.google.common.cache.CacheLoader;
 import com.google.common.collect.FluentIterable;
 import com.google.gerrit.reviewdb.client.AccountDiffPreference.Whitespace;
 import com.google.gerrit.reviewdb.client.Patch;
 import com.google.gerrit.reviewdb.client.RefNames;
+import com.google.gerrit.server.config.ConfigUtil;
+import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.git.GitRepositoryManager;
+import com.google.gerrit.server.git.MergeUtil;
 import com.google.inject.Inject;
 
 import org.eclipse.jgit.diff.DiffEntry;
@@ -35,6 +39,7 @@ import org.eclipse.jgit.diff.Sequence;
 import org.eclipse.jgit.dircache.DirCache;
 import org.eclipse.jgit.dircache.DirCacheBuilder;
 import org.eclipse.jgit.dircache.DirCacheEntry;
+import org.eclipse.jgit.lib.Config;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectId;
@@ -45,8 +50,8 @@ import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.merge.MergeFormatter;
 import org.eclipse.jgit.merge.MergeResult;
-import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.merge.ResolveMerger;
+import org.eclipse.jgit.merge.ThreeWayMergeStrategy;
 import org.eclipse.jgit.patch.FileHeader;
 import org.eclipse.jgit.patch.FileHeader.PatchType;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -66,17 +71,38 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
   static final Logger log = LoggerFactory.getLogger(PatchListLoader.class);
 
   private final GitRepositoryManager repoManager;
   private final PatchListCache patchListCache;
+  private final ThreeWayMergeStrategy mergeStrategy;
+  private final ExecutorService diffExecutor;
+  private final long timeoutMillis;
+  private final Object lock;
+
 
   @Inject
-  PatchListLoader(GitRepositoryManager mgr, PatchListCache plc) {
+  PatchListLoader(GitRepositoryManager mgr,
+      PatchListCache plc,
+      @GerritServerConfig Config cfg,
+      @DiffExecutor ExecutorService de) {
     repoManager = mgr;
     patchListCache = plc;
+    mergeStrategy = MergeUtil.getMergeStrategy(cfg);
+    diffExecutor = de;
+    lock = new Object();
+    timeoutMillis =
+        ConfigUtil.getTimeUnit(cfg, "cache", PatchListCacheImpl.FILE_NAME,
+            "timeout", TimeUnit.MILLISECONDS.convert(5, TimeUnit.SECONDS),
+            TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -158,7 +184,7 @@ public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
         DiffEntry diffEntry = diffEntries.get(i);
         if (paths == null || paths.contains(diffEntry.getNewPath())
             || paths.contains(diffEntry.getOldPath())) {
-          FileHeader fh = df.toFileHeader(diffEntry);
+          FileHeader fh = toFileHeader(key, df, diffEntry);
           entries.add(newEntry(aTree, fh));
         }
       }
@@ -167,6 +193,48 @@ public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
     } finally {
       reader.close();
     }
+  }
+
+  private FileHeader toFileHeader(PatchListKey key,
+      final DiffFormatter diffFormatter, final DiffEntry diffEntry)
+      throws IOException {
+
+    Future<FileHeader> result = diffExecutor.submit(new Callable<FileHeader>() {
+      @Override
+      public FileHeader call() throws IOException {
+        synchronized (lock) {
+          return diffFormatter.toFileHeader(diffEntry);
+        }
+      }
+    });
+
+    try {
+      return result.get(timeoutMillis, TimeUnit.MILLISECONDS);
+    } catch (InterruptedException | TimeoutException e) {
+      log.warn(timeoutMillis + " ms timeout reached for Diff loader"
+                      + " in project " + key.projectKey.get()
+                      + " on commit " + key.getNewId().name()
+                      + " on path " + diffEntry.getNewPath()
+                      + " comparing " + diffEntry.getOldId().name()
+                      + ".." + diffEntry.getNewId().name());
+      result.cancel(true);
+      synchronized (lock) {
+        return toFileHeaderWithoutMyersDiff(diffFormatter, diffEntry);
+      }
+    } catch (ExecutionException e) {
+      // If there was an error computing the result, carry it
+      // up to the caller so the cache knows this key is invalid.
+      Throwables.propagateIfInstanceOf(e.getCause(), IOException.class);
+      throw new IOException(e.getMessage(), e.getCause());
+    }
+  }
+
+  private FileHeader toFileHeaderWithoutMyersDiff(DiffFormatter diffFormatter,
+      DiffEntry diffEntry) throws IOException {
+    HistogramDiff histogramDiff = new HistogramDiff();
+    histogramDiff.setFallbackAlgorithm(null);
+    diffFormatter.setDiffAlgorithm(histogramDiff);
+    return diffFormatter.toFileHeader(diffEntry);
   }
 
   private PatchListEntry newCommitMessage(final RawTextComparator cmp,
@@ -224,7 +292,7 @@ public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
     }
   }
 
-  private static RevObject aFor(final PatchListKey key,
+  private RevObject aFor(final PatchListKey key,
       final Repository repo, final RevWalk rw, final RevCommit b)
       throws IOException {
     if (key.getOldId() != null) {
@@ -240,20 +308,20 @@ public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
         return r;
       }
       case 2:
-        return automerge(repo, rw, b);
+        return automerge(repo, rw, b, mergeStrategy);
       default:
         // TODO(sop) handle an octopus merge.
         return null;
     }
   }
 
-  public static RevTree automerge(Repository repo, RevWalk rw, RevCommit b)
-      throws IOException {
-    return automerge(repo, rw, b, true);
+  public static RevTree automerge(Repository repo, RevWalk rw, RevCommit b,
+      ThreeWayMergeStrategy mergeStrategy) throws IOException {
+    return automerge(repo, rw, b, mergeStrategy, true);
   }
 
   public static RevTree automerge(Repository repo, RevWalk rw, RevCommit b,
-      boolean save) throws IOException {
+      ThreeWayMergeStrategy mergeStrategy, boolean save) throws IOException {
     String hash = b.name();
     String refName = RefNames.REFS_CACHE_AUTOMERGE
         + hash.substring(0, 2)
@@ -264,8 +332,7 @@ public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
       return rw.parseTree(ref.getObjectId());
     }
 
-    ObjectId treeId;
-    ResolveMerger m = (ResolveMerger) MergeStrategy.RESOLVE.newMerger(repo, true);
+    ResolveMerger m = (ResolveMerger) mergeStrategy.newMerger(repo, true);
     final ObjectInserter ins = repo.newObjectInserter();
     try {
       DirCache dc = DirCache.newInCore();
@@ -293,9 +360,11 @@ public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
         // an exception most likely means that the merge tree was not created
         // and m.getMergeResults() is empty. This would mean that all paths are
         // unmerged and Gerrit UI would show all paths in the patch list.
+        log.warn("Error attempting automerge " + refName, e);
         return null;
       }
 
+      ObjectId treeId;
       if (couldMerge) {
         treeId = m.getResultTreeId();
 
@@ -316,10 +385,11 @@ public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
 
         MergeFormatter fmt = new MergeFormatter();
         Map<String, MergeResult<? extends Sequence>> r = m.getMergeResults();
-        Map<String, ObjectId> resolved = new HashMap<String, ObjectId>();
+        Map<String, ObjectId> resolved = new HashMap<>();
         for (Map.Entry<String, MergeResult<? extends Sequence>> entry : r.entrySet()) {
           MergeResult<? extends Sequence> p = entry.getValue();
-          TemporaryBuffer buf = new TemporaryBuffer.LocalFile(null, 10 * 1024 * 1024);
+          TemporaryBuffer buf =
+              new TemporaryBuffer.LocalFile(null, 10 * 1024 * 1024);
           try {
             fmt.formatMerge(buf, p, "BASE", oursName, theirsName, "UTF-8");
             buf.close();
@@ -380,17 +450,18 @@ public class PatchListLoader extends CacheLoader<PatchListKey, PatchList> {
         treeId = dc.writeTree(ins);
       }
       ins.flush();
+
+      if (save) {
+        RefUpdate update = repo.updateRef(refName);
+        update.setNewObjectId(treeId);
+        update.disableRefLog();
+        update.forceUpdate();
+      }
+
+      return rw.lookupTree(treeId);
     } finally {
       ins.close();
     }
-
-    if (save) {
-      RefUpdate update = repo.updateRef(refName);
-      update.setNewObjectId(treeId);
-      update.disableRefLog();
-      update.forceUpdate();
-    }
-    return rw.parseTree(treeId);
   }
 
   private static ObjectId emptyTree(final Repository repo) throws IOException {

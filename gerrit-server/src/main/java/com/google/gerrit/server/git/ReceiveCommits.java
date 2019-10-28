@@ -50,6 +50,7 @@ import com.google.gerrit.common.ChangeHookRunner.HookResult;
 import com.google.gerrit.common.ChangeHooks;
 import com.google.gerrit.common.Nullable;
 import com.google.gerrit.common.data.Capable;
+import com.google.gerrit.common.data.LabelType;
 import com.google.gerrit.common.data.LabelTypes;
 import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRule;
@@ -69,12 +70,15 @@ import com.google.gerrit.reviewdb.client.SubmoduleSubscription;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalCopier;
 import com.google.gerrit.server.ApprovalsUtil;
+import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.GerritPersonIdent;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.account.AccountCache;
 import com.google.gerrit.server.account.AccountResolver;
 import com.google.gerrit.server.change.ChangeInserter;
+import com.google.gerrit.server.change.ChangeKind;
+import com.google.gerrit.server.change.ChangeKindCache;
 import com.google.gerrit.server.change.ChangesCollection;
 import com.google.gerrit.server.change.MergeabilityChecker;
 import com.google.gerrit.server.change.RevisionResource;
@@ -97,12 +101,14 @@ import com.google.gerrit.server.mail.ReplacePatchSetSender;
 import com.google.gerrit.server.notedb.ChangeUpdate;
 import com.google.gerrit.server.patch.PatchSetInfoFactory;
 import com.google.gerrit.server.project.ChangeControl;
+import com.google.gerrit.server.project.NoSuchChangeException;
 import com.google.gerrit.server.project.ProjectCache;
 import com.google.gerrit.server.project.ProjectControl;
 import com.google.gerrit.server.project.ProjectState;
 import com.google.gerrit.server.project.RefControl;
 import com.google.gerrit.server.query.change.ChangeData;
 import com.google.gerrit.server.ssh.SshInfo;
+import com.google.gerrit.server.util.LabelVote;
 import com.google.gerrit.server.util.MagicBranch;
 import com.google.gerrit.server.util.RequestScopePropagator;
 import com.google.gerrit.server.util.TimeUtil;
@@ -278,6 +284,7 @@ public class ReceiveCommits {
   private final ChangeHooks hooks;
   private final ApprovalsUtil approvalsUtil;
   private final ApprovalCopier approvalCopier;
+  private final ChangeMessagesUtil cmUtil;
   private final GitRepositoryManager repoManager;
   private final ProjectCache projectCache;
   private final String canonicalWebUrl;
@@ -294,6 +301,7 @@ public class ReceiveCommits {
   private final SshInfo sshInfo;
   private final AllProjectsName allProjectsName;
   private final ReceiveConfig receiveConfig;
+  private final ChangeKindCache changeKindCache;
 
   private final ProjectControl projectControl;
   private final Project project;
@@ -305,10 +313,10 @@ public class ReceiveCommits {
 
   private List<CreateRequest> newChanges = Collections.emptyList();
   private final Map<Change.Id, ReplaceRequest> replaceByChange =
-      new HashMap<Change.Id, ReplaceRequest>();
+      new HashMap<>();
   private final Map<RevCommit, ReplaceRequest> replaceByCommit =
-      new HashMap<RevCommit, ReplaceRequest>();
-  private final Set<RevCommit> validCommits = new HashSet<RevCommit>();
+      new HashMap<>();
+  private final Set<RevCommit> validCommits = new HashSet<>();
 
   private ListMultimap<Change.Id, Ref> refsByChange;
   private SetMultimap<ObjectId, Ref> refsById;
@@ -319,7 +327,7 @@ public class ReceiveCommits {
   private final MergeQueue mergeQueue;
   private final DynamicMap<ProjectConfigEntry> pluginConfigEntries;
 
-  private final List<CommitValidationMessage> messages = new ArrayList<CommitValidationMessage>();
+  private final List<CommitValidationMessage> messages = new ArrayList<>();
   private ListMultimap<Error, String> errors = LinkedListMultimap.create();
   private Task newProgress;
   private Task replaceProgress;
@@ -343,6 +351,7 @@ public class ReceiveCommits {
       final ChangeHooks hooks,
       final ApprovalsUtil approvalsUtil,
       final ApprovalCopier approvalCopier,
+      final ChangeMessagesUtil cmUtil,
       final ProjectCache projectCache,
       final GitRepositoryManager repoManager,
       final TagCache tagCache,
@@ -366,6 +375,7 @@ public class ReceiveCommits {
       final SubmoduleOp.Factory subOpFactory,
       final Provider<Submit> submitProvider,
       final MergeQueue mergeQueue,
+      final ChangeKindCache changeKindCache,
       final DynamicMap<ProjectConfigEntry> pluginConfigEntries) throws IOException {
     this.currentUser = (IdentifiedUser) projectControl.getCurrentUser();
     this.db = db;
@@ -382,6 +392,7 @@ public class ReceiveCommits {
     this.hooks = hooks;
     this.approvalsUtil = approvalsUtil;
     this.approvalCopier = approvalCopier;
+    this.cmUtil = cmUtil;
     this.projectCache = projectCache;
     this.repoManager = repoManager;
     this.canonicalWebUrl = canonicalWebUrl;
@@ -398,6 +409,7 @@ public class ReceiveCommits {
     this.sshInfo = sshInfo;
     this.allProjectsName = allProjectsName;
     this.receiveConfig = config;
+    this.changeKindCache = changeKindCache;
 
     this.projectControl = projectControl;
     this.labelTypes = projectControl.getLabelTypes();
@@ -438,7 +450,7 @@ public class ReceiveCommits {
       rp.setCheckReferencedObjectsAreReachable(config.checkReferencedObjectsAreReachable);
       rp.setAdvertiseRefsHook(new VisibleRefFilter(tagCache, changeCache, repo, projectControl, db, false));
     }
-    List<AdvertiseRefsHook> advHooks = new ArrayList<AdvertiseRefsHook>(3);
+    List<AdvertiseRefsHook> advHooks = new ArrayList<>(3);
     advHooks.add(new AdvertiseRefsHook() {
       @Override
       public void advertiseRefs(BaseReceivePack rp)
@@ -575,65 +587,70 @@ public class ReceiveCommits {
     }
 
     for (final ReceiveCommand c : commands) {
-      if (c.getResult() == OK) {
-        switch (c.getType()) {
-          case CREATE:
-            if (isHead(c) || isConfig(c)) {
-              autoCloseChanges(c);
-            }
-            break;
+        if (c.getResult() == OK) {
+          try {
+            switch (c.getType()) {
+              case CREATE:
+                if (isHead(c) || isConfig(c)) {
+                  autoCloseChanges(c);
+                }
+                break;
 
-          case UPDATE: // otherwise known as a fast-forward
-            tagCache.updateFastForward(project.getNameKey(),
-                c.getRefName(),
-                c.getOldId(),
-                c.getNewId());
-            if (isHead(c) || isConfig(c)) {
-              autoCloseChanges(c);
-            }
-            break;
+              case UPDATE: // otherwise known as a fast-forward
+                tagCache.updateFastForward(project.getNameKey(),
+                    c.getRefName(),
+                    c.getOldId(),
+                    c.getNewId());
+                if (isHead(c) || isConfig(c)) {
+                  autoCloseChanges(c);
+                }
+                break;
 
-          case UPDATE_NONFASTFORWARD:
-            if (isHead(c) || isConfig(c)) {
-              autoCloseChanges(c);
-            }
-            break;
+              case UPDATE_NONFASTFORWARD:
+                if (isHead(c) || isConfig(c)) {
+                  autoCloseChanges(c);
+                }
+                break;
 
-          case DELETE:
-            ResultSet<SubmoduleSubscription> submoduleSubscriptions = null;
-            Branch.NameKey projRef = new Branch.NameKey(project.getNameKey(),
-                c.getRefName());
-            try {
-              submoduleSubscriptions =
-                  db.submoduleSubscriptions().bySuperProject(projRef);
-              db.submoduleSubscriptions().delete(submoduleSubscriptions);
-            } catch (OrmException e) {
-              log.error("Cannot delete submodule subscription(s) of branch "
-                  + projRef + ": " + submoduleSubscriptions, e);
+              case DELETE:
+                ResultSet<SubmoduleSubscription> submoduleSubscriptions = null;
+                Branch.NameKey projRef = new Branch.NameKey(project.getNameKey(),
+                    c.getRefName());
+                try {
+                  submoduleSubscriptions =
+                      db.submoduleSubscriptions().bySuperProject(projRef);
+                  db.submoduleSubscriptions().delete(submoduleSubscriptions);
+                } catch (OrmException e) {
+                  log.error("Cannot delete submodule subscription(s) of branch "
+                      + projRef + ": " + submoduleSubscriptions, e);
+                }
+                break;
             }
-            break;
+
+            if (isConfig(c)) {
+              projectCache.evict(project);
+              ProjectState ps = projectCache.get(project.getNameKey());
+              repoManager.setProjectDescription(project.getNameKey(), //
+                  ps.getProject().getDescription());
+            }
+
+            if (!MagicBranch.isMagicBranch(c.getRefName())) {
+              // We only fire gitRefUpdated for direct refs updates.
+              // Events for change refs are fired when they are created.
+              //
+              gitRefUpdated.fire(project.getNameKey(), c.getRefName(),
+                  c.getOldId(), c.getNewId());
+              hooks.doRefUpdatedHook(
+                  new Branch.NameKey(project.getNameKey(), c.getRefName()),
+                  c.getOldId(),
+                  c.getNewId(),
+                  currentUser.getAccount());
+            }
+          } catch (NoSuchChangeException e) {
+            c.setResult(REJECTED_OTHER_REASON,
+                "No such change: " + e.getMessage());
+          }
         }
-
-        if (isConfig(c)) {
-          projectCache.evict(project);
-          ProjectState ps = projectCache.get(project.getNameKey());
-          repoManager.setProjectDescription(project.getNameKey(), //
-              ps.getProject().getDescription());
-        }
-
-        if (!MagicBranch.isMagicBranch(c.getRefName())) {
-          // We only fire gitRefUpdated for direct refs updates.
-          // Events for change refs are fired when they are created.
-          //
-          gitRefUpdated.fire(project.getNameKey(), c.getRefName(),
-              c.getOldId(), c.getNewId());
-          hooks.doRefUpdatedHook(
-              new Branch.NameKey(project.getNameKey(), c.getRefName()),
-              c.getOldId(),
-              c.getNewId(),
-              currentUser.getAccount());
-        }
-      }
     }
     closeProgress.end();
     commandProgress.end();
@@ -677,7 +694,9 @@ public class ReceiveCommits {
     StringBuilder m = new StringBuilder()
         .append("  ")
         .append(url)
-        .append(change.getChangeId());
+        .append(change.getChangeId())
+        .append(" ")
+        .append(ChangeUtil.cropSubject(change.getSubject()));
     if (change.getStatus() == Change.Status.DRAFT) {
       m.append(" [DRAFT]");
     }
@@ -714,6 +733,8 @@ public class ReceiveCommits {
         }
       } else if (replace.inputCommand.getResult() == NOT_ATTEMPTED) {
         reject(replace.inputCommand, "internal server error");
+        log.error(String.format("Replacement for project %s was not attempted",
+            project.getName()));
       }
     }
 
@@ -1082,7 +1103,10 @@ public class ReceiveCommits {
     RefControl ctl;
     Set<Account.Id> reviewer = Sets.newLinkedHashSet();
     Set<Account.Id> cc = Sets.newLinkedHashSet();
+    Map<String, Short> labels = new HashMap<>();
     List<RevCommit> baseCommit;
+    LabelTypes labelTypes;
+    CmdLineParser clp;
 
     @Option(name = "--base", metaVar = "BASE", usage = "merge base of changes")
     List<ObjectId> base;
@@ -1111,9 +1135,23 @@ public class ReceiveCommits {
       draft = !publish;
     }
 
-    MagicBranchInput(ReceiveCommand cmd) {
+    @Option(name = "-l", metaVar = "LABEL+VALUE",
+        usage = "label(s) to assign (defaults to +1 if no value provided")
+    void addLabel(final String token) throws CmdLineException {
+      LabelVote v = LabelVote.parse(token);
+      try {
+        LabelType.checkName(v.getLabel());
+        ApprovalsUtil.checkLabel(labelTypes, v.getLabel(), v.getValue());
+      } catch (IllegalArgumentException e) {
+        throw clp.reject(e.getMessage());
+      }
+      labels.put(v.getLabel(), v.getValue());
+    }
+
+    MagicBranchInput(ReceiveCommand cmd, LabelTypes labelTypes) {
       this.cmd = cmd;
       this.draft = cmd.getRefName().startsWith(MagicBranch.NEW_DRAFT_CHANGE);
+      this.labelTypes = labelTypes;
     }
 
     boolean isDraft() {
@@ -1126,6 +1164,10 @@ public class ReceiveCommits {
 
     MailRecipients getMailRecipients() {
       return new MailRecipients(reviewer, cc);
+    }
+
+    Map<String, Short> getLabels() {
+      return labels;
     }
 
     String parse(CmdLineParser clp, Repository repo, Set<String> refs)
@@ -1170,6 +1212,10 @@ public class ReceiveCommits {
       }
       return ref.substring(0, split);
     }
+
+    void setCmdLineParser(CmdLineParser clp) {
+      this.clp = clp;
+    }
   }
 
   private void parseMagicBranch(final ReceiveCommand cmd) {
@@ -1179,12 +1225,13 @@ public class ReceiveCommits {
       return;
     }
 
-    magicBranch = new MagicBranchInput(cmd);
+    magicBranch = new MagicBranchInput(cmd, labelTypes);
     magicBranch.reviewer.addAll(reviewersFromCommandLine);
     magicBranch.cc.addAll(ccFromCommandLine);
 
     String ref;
     CmdLineParser clp = optionParserFactory.create(magicBranch);
+    magicBranch.setCmdLineParser(clp);
     try {
       ref = magicBranch.parse(clp, repo, rp.getAdvertisedRefs().keySet());
     } catch (CmdLineException e) {
@@ -1242,6 +1289,7 @@ public class ReceiveCommits {
     if (magicBranch.isSubmit() && !projectControl.controlForRef(
         MagicBranch.NEW_CHANGE + ref).canSubmit()) {
       reject(cmd, "submit not allowed");
+      return;
     }
 
     RevWalk walk = rp.getRevWalk();
@@ -1395,7 +1443,7 @@ public class ReceiveCommits {
       }
 
       List<ChangeLookup> pending = Lists.newArrayList();
-      final Set<Change.Key> newChangeIds = new HashSet<Change.Key>();
+      final Set<Change.Key> newChangeIds = new HashSet<>();
       for (;;) {
         final RevCommit c = walk.next();
         if (c == null) {
@@ -1583,8 +1631,10 @@ public class ReceiveCommits {
       final Account.Id me = currentUser.getAccountId();
       final List<FooterLine> footerLines = commit.getFooterLines();
       final MailRecipients recipients = new MailRecipients();
+      Map<String, Short> approvals = new HashMap<>();
       if (magicBranch != null) {
         recipients.add(magicBranch.getMailRecipients());
+        approvals = magicBranch.getLabels();
       }
       recipients.add(getRecipientsFromFooters(accountResolver, ps, footerLines));
       recipients.remove(me);
@@ -1596,6 +1646,7 @@ public class ReceiveCommits {
 
       ins
         .setReviewers(recipients.getReviewers())
+        .setApprovals(approvals)
         .setMessage(msg)
         .setSendMail(false)
         .insert();
@@ -1683,14 +1734,18 @@ public class ReceiveCommits {
         }
       }
     } catch (OrmException err) {
-      log.error("Cannot read database before replacement", err);
+      log.error(String.format(
+          "Cannot read database before replacement for project %s",
+          project.getName()), err);
       for (ReplaceRequest req : replaceByChange.values()) {
         if (req.inputCommand.getResult() == NOT_ATTEMPTED) {
           req.inputCommand.setResult(REJECTED_OTHER_REASON, "internal server error");
         }
       }
     } catch (IOException err) {
-      log.error("Cannot read repository before replacement", err);
+      log.error(String.format(
+          "Cannot read repository before replacement for project %s",
+          project.getName()), err);
       for (ReplaceRequest req : replaceByChange.values()) {
         if (req.inputCommand.getResult() == NOT_ATTEMPTED) {
           req.inputCommand.setResult(REJECTED_OTHER_REASON, "internal server error");
@@ -1887,7 +1942,7 @@ public class ReceiveCommits {
       ListenableFuture<PatchSet.Id> future = changeUpdateExector.submit(
           requestScopePropagator.wrap(new Callable<PatchSet.Id>() {
         @Override
-        public PatchSet.Id call() throws OrmException, IOException {
+        public PatchSet.Id call() throws OrmException, IOException, NoSuchChangeException {
           try {
             if (caller == Thread.currentThread()) {
               return insertPatchSet(db);
@@ -1909,12 +1964,38 @@ public class ReceiveCommits {
       return Futures.makeChecked(future, INSERT_EXCEPTION);
     }
 
+    private ChangeMessage newChangeMessage(ReviewDb db) throws OrmException {
+      msg =
+          new ChangeMessage(new ChangeMessage.Key(change.getId(), ChangeUtil
+              .messageUUID(db)), currentUser.getAccountId(), newPatchSet.getCreatedOn(),
+              newPatchSet.getId());
+      RevCommit priorCommit = revisions.inverse().get(priorPatchSet);
+      ChangeKind changeKind = changeKindCache.getChangeKind(
+          projectControl.getProjectState(), repo, priorCommit, newCommit);
+      String message = "Uploaded patch set " + newPatchSet.getPatchSetId();
+      switch (changeKind) {
+        case TRIVIAL_REBASE:
+          message += ": Patch Set " + priorPatchSet.get() + " was rebased";
+          break;
+        case NO_CODE_CHANGE:
+          message += ": Commit message was updated";
+          break;
+        case REWORK:
+        default:
+          break;
+      }
+      msg.setMessage(message + ".");
+      return msg;
+    }
+
     PatchSet.Id insertPatchSet(ReviewDb db) throws OrmException, IOException {
       final Account.Id me = currentUser.getAccountId();
       final List<FooterLine> footerLines = newCommit.getFooterLines();
       final MailRecipients recipients = new MailRecipients();
+      Map<String, Short> approvals = new HashMap<>();
       if (magicBranch != null) {
         recipients.add(magicBranch.getMailRecipients());
+        approvals = magicBranch.getLabels();
       }
       recipients.add(getRecipientsFromFooters(accountResolver, newPatchSet, footerLines));
       recipients.remove(me);
@@ -1942,13 +2023,11 @@ public class ReceiveCommits {
         approvalCopier.copy(db, changeCtl, newPatchSet);
         approvalsUtil.addReviewers(db, update, labelTypes, change, newPatchSet,
             info, recipients.getReviewers(), oldRecipients.getAll());
+        approvalsUtil.addApprovals(db, update, labelTypes, newPatchSet, info,
+            change, changeCtl, approvals);
         recipients.add(oldRecipients);
 
-        msg =
-            new ChangeMessage(new ChangeMessage.Key(change.getId(), ChangeUtil
-                .messageUUID(db)), me, newPatchSet.getCreatedOn(), newPatchSet.getId());
-        msg.setMessage("Uploaded patch set " + newPatchSet.getPatchSetId() + ".");
-        db.changeMessages().insert(Collections.singleton(msg));
+        cmUtil.addChangeMessage(db, update, newChangeMessage(db));
 
         if (mergedIntoRef == null) {
           // Change should be new, so it can go through review again.
@@ -2004,7 +2083,7 @@ public class ReceiveCommits {
       if (mergedIntoRef != null) {
         // Change was already submitted to a branch, close it.
         //
-        markChangeMergedByPush(db, this);
+        markChangeMergedByPush(db, this, changeCtl);
       }
 
       if (cmd.getResult() == NOT_ATTEMPTED) {
@@ -2212,7 +2291,7 @@ public class ReceiveCommits {
     return true;
   }
 
-  private void autoCloseChanges(final ReceiveCommand cmd) {
+  private void autoCloseChanges(final ReceiveCommand cmd) throws NoSuchChangeException {
     final RevWalk rw = rp.getRevWalk();
     try {
       rw.reset();
@@ -2224,7 +2303,7 @@ public class ReceiveCommits {
       final SetMultimap<ObjectId, Ref> byCommit = changeRefsById();
       final Map<Change.Key, Change.Id> byKey = openChangesByKey(
           new Branch.NameKey(project.getNameKey(), cmd.getRefName()));
-      final List<ReplaceRequest> toClose = new ArrayList<ReplaceRequest>();
+      final List<ReplaceRequest> toClose = new ArrayList<>();
       RevCommit c;
       while ((c = rw.next()) != null) {
         final Set<Ref> refs = byCommit.get(c.copy());
@@ -2312,7 +2391,7 @@ public class ReceiveCommits {
     result.newPatchSet = ps;
     result.info = patchSetInfoFactory.get(commit, psi);
     result.mergedIntoRef = refName;
-    markChangeMergedByPush(db, result);
+    markChangeMergedByPush(db, result, result.changeCtl);
     hooks.doChangeMergedHook(
         change, currentUser.getAccount(), result.newPatchSet, db);
     sendMergedEmail(result);
@@ -2333,18 +2412,20 @@ public class ReceiveCommits {
 
   private Map<Change.Key, Change.Id> openChangesByKey(Branch.NameKey branch)
       throws OrmException {
-    final Map<Change.Key, Change.Id> r = new HashMap<Change.Key, Change.Id>();
+    final Map<Change.Key, Change.Id> r = new HashMap<>();
     for (Change c : db.changes().byBranchOpenAll(branch)) {
       r.put(c.getKey(), c.getId());
     }
     return r;
   }
 
-  private void markChangeMergedByPush(ReviewDb db, final ReplaceRequest result)
-      throws OrmException, IOException {
+  private void markChangeMergedByPush(ReviewDb db, final ReplaceRequest result,
+      ChangeControl control) throws OrmException, IOException {
     Change.Id id = result.change.getId();
     db.changes().beginTransaction(id);
     Change change;
+
+    ChangeUpdate update;
     try {
       change = db.changes().atomicUpdate(id, new AtomicUpdate<Change>() {
           @Override
@@ -2377,12 +2458,15 @@ public class ReceiveCommits {
           result.info.getKey());
       msg.setMessage(msgBuf.toString());
 
-      db.changeMessages().insert(Collections.singleton(msg));
+      update = updateFactory.create(control, change.getLastUpdatedOn());
+
+      cmUtil.addChangeMessage(db, update, msg);
       db.commit();
     } finally {
       db.rollback();
     }
     indexer.index(db, change);
+    update.commit();
   }
 
   private void sendMergedEmail(final ReplaceRequest result) {

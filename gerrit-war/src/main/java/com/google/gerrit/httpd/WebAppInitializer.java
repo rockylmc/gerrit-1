@@ -19,6 +19,7 @@ import static com.google.inject.Stage.PRODUCTION;
 
 import com.google.common.base.Splitter;
 import com.google.gerrit.common.ChangeHookRunner;
+import com.google.gerrit.httpd.auth.oauth.OAuthModule;
 import com.google.gerrit.httpd.auth.openid.OpenIdModule;
 import com.google.gerrit.httpd.plugins.HttpPluginModule;
 import com.google.gerrit.lifecycle.LifecycleManager;
@@ -35,15 +36,17 @@ import com.google.gerrit.server.config.GerritGlobalModule;
 import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.gerrit.server.config.GerritServerConfigModule;
 import com.google.gerrit.server.config.MasterNodeStartup;
+import com.google.gerrit.server.config.RestCacheAdminModule;
 import com.google.gerrit.server.config.SitePath;
 import com.google.gerrit.server.contact.HttpContactStoreConnection;
+import com.google.gerrit.server.git.GarbageCollectionRunner;
 import com.google.gerrit.server.git.LocalDiskRepositoryManager;
 import com.google.gerrit.server.git.ReceiveCommitsExecutorModule;
 import com.google.gerrit.server.git.WorkQueue;
 import com.google.gerrit.server.index.IndexModule;
 import com.google.gerrit.server.mail.SignedTokenEmailTokenVerifier;
 import com.google.gerrit.server.mail.SmtpEmailSender;
-import com.google.gerrit.server.patch.IntraLineWorkerPool;
+import com.google.gerrit.server.patch.DiffExecutorModule;
 import com.google.gerrit.server.plugins.PluginGuiceEnvironment;
 import com.google.gerrit.server.plugins.PluginRestApiModule;
 import com.google.gerrit.server.schema.DataSourceModule;
@@ -201,7 +204,7 @@ public class WebAppInitializer extends GuiceServletContextListener
   }
 
   private Injector createDbInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     if (sitePath != null) {
       Module sitePathModule = new AbstractModule() {
         @Override
@@ -249,7 +252,7 @@ public class WebAppInitializer extends GuiceServletContextListener
   }
 
   private Injector createCfgInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     if (sitePath == null) {
       // If we didn't get the site path from the system property
       // we need to get it from the database, as that's our old
@@ -272,18 +275,19 @@ public class WebAppInitializer extends GuiceServletContextListener
   }
 
   private Injector createSysInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     modules.add(new WorkQueue.Module());
     modules.add(new ChangeHookRunner.Module());
     modules.add(new ReceiveCommitsExecutorModule());
     modules.add(new MergeabilityChecksExecutorModule());
-    modules.add(new IntraLineWorkerPool.Module());
+    modules.add(new DiffExecutorModule());
     modules.add(cfgInjector.getInstance(GerritGlobalModule.class));
     modules.add(new InternalAccountDirectory.Module());
     modules.add(new DefaultCacheFactory.Module());
     modules.add(new SmtpEmailSender.Module());
     modules.add(new SignedTokenEmailTokenVerifier.Module());
     modules.add(new PluginRestApiModule());
+    modules.add(new RestCacheAdminModule());
     AbstractModule changeIndexModule;
     switch (IndexModule.getIndexType(cfgInjector)) {
       case LUCENE:
@@ -310,11 +314,12 @@ public class WebAppInitializer extends GuiceServletContextListener
         bind(GerritUiOptions.class).toInstance(new GerritUiOptions(false));
       }
     });
+    modules.add(GarbageCollectionRunner.module());
     return cfgInjector.createChildInjector(modules);
   }
 
   private Injector createSshInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     modules.add(sysInjector.getInstance(SshModule.class));
     modules.add(new SshHostKeyModule());
     modules.add(new DefaultCommandModule(false));
@@ -322,7 +327,7 @@ public class WebAppInitializer extends GuiceServletContextListener
   }
 
   private Injector createWebInjector() {
-    final List<Module> modules = new ArrayList<Module>();
+    final List<Module> modules = new ArrayList<>();
     modules.add(RequestContextFilter.module());
     modules.add(AllRequestFilter.module());
     modules.add(sysInjector.getInstance(GitOverHttpModule.class));
@@ -332,13 +337,15 @@ public class WebAppInitializer extends GuiceServletContextListener
     } else {
       modules.add(new NoSshModule());
     }
-    modules.add(CacheBasedWebSession.module());
+    modules.add(H2CacheBasedWebSession.module());
     modules.add(HttpContactStoreConnection.module());
     modules.add(new HttpPluginModule());
 
     AuthConfig authConfig = cfgInjector.getInstance(AuthConfig.class);
     if (authConfig.getAuthType() == AuthType.OPENID) {
       modules.add(new OpenIdModule());
+    } else if (authConfig.getAuthType() == AuthType.OAUTH) {
+      modules.add(new OAuthModule());
     }
 
     return sysInjector.createChildInjector(modules);

@@ -54,7 +54,6 @@ import org.kohsuke.args4j.spi.OptionHandler;
 import org.kohsuke.args4j.spi.Setter;
 import org.kohsuke.args4j.spi.FieldSetter;
 
-
 import java.io.StringWriter;
 import java.io.Writer;
 import java.lang.annotation.Annotation;
@@ -131,7 +130,7 @@ public class CmdLineParser {
     out.write(name);
 
     char next = '?';
-    List<NamedOptionDef> booleans = new ArrayList<NamedOptionDef>();
+    List<NamedOptionDef> booleans = new ArrayList<>();
     for (@SuppressWarnings("rawtypes") OptionHandler handler : parser.options) {
       if (handler.option instanceof NamedOptionDef) {
         NamedOptionDef n = (NamedOptionDef) handler.option;
@@ -442,5 +441,9 @@ public class CmdLineParser {
     public boolean isMultiValued() {
       return false;
     }
+  }
+
+  public CmdLineException reject(String message) {
+    return new CmdLineException(parser, message);
   }
 }

@@ -1,6 +1,6 @@
 include_defs('//tools/git.defs')
 
-java_library2(
+java_library(
   name = 'init',
   srcs = glob(['src/main/java/**/*.java']),
   deps = [
@@ -8,6 +8,7 @@ java_library2(
     '//gerrit-extension-api:api',
     '//gerrit-httpd:httpd',
     '//gerrit-lucene:lucene',
+    '//gerrit-oauth:oauth',
     '//gerrit-openid:openid',
     '//gerrit-pgm:init-api',
     '//gerrit-pgm:init-base',
@@ -23,7 +24,7 @@ java_library2(
     '//lib/log:api',
     '//lib/jgit:jgit',
   ],
-  compile_deps = ['//lib:servlet-api-3_1'],
+  provided_deps = ['//lib:servlet-api-3_1'],
   visibility = [
     '//:',
     '//gerrit-gwtdebug:gwtdebug',
@@ -33,7 +34,7 @@ java_library2(
 
 genrule(
   name = 'webapp_assets',
-  cmd = 'cd $SRCDIR/src/main/webapp; zip -qr $OUT .',
+  cmd = 'cd src/main/webapp; zip -qr $OUT .',
   srcs = glob(['src/main/webapp/**/*']),
   deps = [],
   out = 'webapp_assets.zip',
@@ -42,15 +43,14 @@ genrule(
 
 genrule(
   name = 'log4j-config__jar',
-  cmd = 'jar cf $OUT -C $SRCDIR/src/main/resources .',
+  cmd = 'jar cf $OUT -C src/main/resources .',
   srcs = ['src/main/resources/log4j.properties'],
   out = 'log4j-config.jar',
 )
 
 prebuilt_jar(
   name = 'log4j-config',
-  binary_jar = genfile('log4j-config.jar'),
-  deps = [':log4j-config__jar'],
+  binary_jar = ':log4j-config__jar',
   visibility = [
     '//:',
     '//tools/eclipse:classpath',
@@ -59,8 +59,7 @@ prebuilt_jar(
 
 prebuilt_jar(
   name = 'version',
-  binary_jar = genfile('version.jar'),
-  deps = [':gen_version'],
+  binary_jar = ':gen_version',
   visibility = ['//:'],
 )
 

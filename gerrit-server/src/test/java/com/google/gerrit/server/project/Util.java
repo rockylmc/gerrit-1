@@ -20,6 +20,7 @@ import static com.google.gerrit.server.group.SystemGroupBackend.REGISTERED_USERS
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.Lists;
+import com.google.gerrit.common.data.AccessSection;
 import com.google.gerrit.common.data.GroupReference;
 import com.google.gerrit.common.data.LabelType;
 import com.google.gerrit.common.data.LabelValue;
@@ -38,6 +39,8 @@ import com.google.gerrit.server.account.CapabilityControl;
 import com.google.gerrit.server.account.GroupBackend;
 import com.google.gerrit.server.account.GroupMembership;
 import com.google.gerrit.server.account.ListGroupMembership;
+import com.google.gerrit.server.change.ChangeKindCache;
+import com.google.gerrit.server.change.ChangeKindCacheImpl;
 import com.google.gerrit.server.config.AllProjectsName;
 import com.google.gerrit.server.config.AnonymousCowardName;
 import com.google.gerrit.server.config.AnonymousCowardNameProvider;
@@ -90,7 +93,7 @@ public class Util {
     return new LabelType(name, Arrays.asList(values));
   }
 
-  static public PermissionRule newRule(ProjectConfig project,
+  public static PermissionRule newRule(ProjectConfig project,
       AccountGroup.UUID groupUUID) {
     GroupReference group = new GroupReference(groupUUID, groupUUID.get());
     group = project.resolve(group);
@@ -98,7 +101,7 @@ public class Util {
     return new PermissionRule(group);
   }
 
-  static public PermissionRule grant(ProjectConfig project,
+  public static PermissionRule allow(ProjectConfig project,
       String permissionName, int min, int max, AccountGroup.UUID group,
       String ref) {
     PermissionRule rule = newRule(project, group);
@@ -107,29 +110,38 @@ public class Util {
     return grant(project, permissionName, rule, ref);
   }
 
-  static public PermissionRule grant(ProjectConfig project,
-      String permissionName, AccountGroup.UUID group, String ref) {
-    return grant(project, permissionName, newRule(project, group), ref);
-  }
-
-  static public void doNotInherit(ProjectConfig project, String permissionName,
+  public static PermissionRule block(ProjectConfig project,
+      String permissionName, int min, int max, AccountGroup.UUID group,
       String ref) {
-    project.getAccessSection(ref, true) //
-        .getPermission(permissionName, true) //
-        .setExclusiveGroup(true);
-  }
-
-  static private PermissionRule grant(ProjectConfig project,
-      String permissionName, PermissionRule rule, String ref) {
-    project.getAccessSection(ref, true) //
-        .getPermission(permissionName, true) //
-        .add(rule);
-    return rule;
+    PermissionRule rule = newRule(project, group);
+    rule.setMin(min);
+    rule.setMax(max);
+    PermissionRule r = grant(project, permissionName, rule, ref);
+    r.setBlock();
+    return r;
   }
 
   public static PermissionRule allow(ProjectConfig project,
       String permissionName, AccountGroup.UUID group, String ref) {
     return grant(project, permissionName, newRule(project, group), ref);
+  }
+
+  public static PermissionRule allow(ProjectConfig project,
+      String capabilityName, AccountGroup.UUID group) {
+    PermissionRule rule = newRule(project, group);
+    project.getAccessSection(AccessSection.GLOBAL_CAPABILITIES, true)
+        .getPermission(capabilityName, true)
+        .add(rule);
+    return rule;
+  }
+
+  public static PermissionRule block(ProjectConfig project,
+      String capabilityName, AccountGroup.UUID group) {
+    PermissionRule rule = newRule(project, group);
+    project.getAccessSection(AccessSection.GLOBAL_CAPABILITIES, true)
+        .getPermission(capabilityName, true)
+        .add(rule);
+    return rule;
   }
 
   public static PermissionRule block(ProjectConfig project,
@@ -146,6 +158,21 @@ public class Util {
     return r;
   }
 
+  public static void doNotInherit(ProjectConfig project, String permissionName,
+      String ref) {
+    project.getAccessSection(ref, true) //
+        .getPermission(permissionName, true) //
+        .setExclusiveGroup(true);
+  }
+
+  private static PermissionRule grant(ProjectConfig project,
+      String permissionName, PermissionRule rule, String ref) {
+    project.getAccessSection(ref, true) //
+        .getPermission(permissionName, true) //
+        .add(rule);
+    return rule;
+  }
+
   private final Map<Project.NameKey, ProjectState> all;
   private final ProjectCache projectCache;
   private final CapabilityControl.Factory capabilityControlFactory;
@@ -153,17 +180,19 @@ public class Util {
   private final PermissionCollection.Factory sectionSorter;
   private final GitRepositoryManager repoManager;
 
-  private final AllProjectsName allProjectsName = new AllProjectsName("parent");
-  private final ProjectConfig parent = new ProjectConfig(allProjectsName);
+  private final AllProjectsName allProjectsName =
+      new AllProjectsName("All-Projects");
+  private final ProjectConfig allProjects;
 
   public Util() {
-    all = new HashMap<Project.NameKey, ProjectState>();
+    all = new HashMap<>();
     repoManager = new InMemoryRepositoryManager();
     try {
       Repository repo = repoManager.createRepository(allProjectsName);
-      parent.load(repo);
-      parent.getLabelSections().put(CR.getName(), CR);
-      add(parent);
+      allProjects = new ProjectConfig(new Project.NameKey(allProjectsName.get()));
+      allProjects.load(repo);
+      allProjects.getLabelSections().put(CR.getName(), CR);
+      add(allProjects);
     } catch (IOException | ConfigInvalidException e) {
       throw new RuntimeException(e);
     }
@@ -172,6 +201,11 @@ public class Util {
       @Override
       public ProjectState getAllProjects() {
         return get(allProjectsName);
+      }
+
+      @Override
+      public ProjectState getAllUsers() {
+        return null;
       }
 
       @Override
@@ -236,6 +270,7 @@ public class Util {
             .toProvider(CanonicalWebUrlProvider.class);
         bind(String.class).annotatedWith(AnonymousCowardName.class)
             .toProvider(AnonymousCowardNameProvider.class);
+        bind(ChangeKindCache.class).to(ChangeKindCacheImpl.NoCache.class);
       }
     });
 
@@ -246,10 +281,6 @@ public class Util {
         injector.getInstance(CapabilityControl.Factory.class);
     changeControlFactory =
       injector.getInstance(ChangeControl.AssistedFactory.class);
-  }
-
-  public ProjectConfig getParentConfig() {
-    return this.parent;
   }
 
   public void add(ProjectConfig pc) {

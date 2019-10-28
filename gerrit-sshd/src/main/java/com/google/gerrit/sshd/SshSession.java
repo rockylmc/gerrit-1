@@ -26,8 +26,7 @@ import java.net.SocketAddress;
 /** Global data related to an active SSH connection. */
 public class SshSession {
   /** ServerSession attribute key for this object instance. */
-  public static final AttributeKey<SshSession> KEY =
-      new AttributeKey<SshSession>();
+  public static final AttributeKey<SshSession> KEY = new AttributeKey<>();
 
   private final int sessionId;
   private final SocketAddress remoteAddress;
@@ -65,6 +64,14 @@ public class SshSession {
     return identity;
   }
 
+  public SocketAddress getRemoteAddress() {
+    return remoteAddress;
+  }
+
+  public String getRemoteAddressAsString() {
+    return remoteAsString;
+  }
+
   String getUsername() {
     return username;
   }
@@ -93,14 +100,6 @@ public class SshSession {
   /** @return {@code true} if the authentication did not succeed. */
   boolean isAuthenticationError() {
     return authError != null;
-  }
-
-  SocketAddress getRemoteAddress() {
-    return remoteAddress;
-  }
-
-  String getRemoteAddressAsString() {
-    return remoteAsString;
   }
 
   private static String format(final SocketAddress remote) {

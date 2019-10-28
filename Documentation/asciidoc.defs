@@ -16,14 +16,12 @@ def genasciidoc(
     name,
     out,
     srcs = [],
-    deps = [],
     attributes = [],
     backend = None,
     visibility = []):
   EXPN = '.expn'
 
   asciidoc = [
-      'cd $SRCDIR;',
       '$(exe //lib/asciidoctor:asciidoc)',
       '-z', '$OUT',
       '--tmp', '$TMP',
@@ -36,33 +34,35 @@ def genasciidoc(
     asciidoc.extend(['-a', attribute])
   asciidoc.append('$SRCS')
   newsrcs = ["doc.css"]
-  newdeps = deps + ['//lib/asciidoctor:asciidoc']
-
   for src in srcs:
-    tx = []
     fn = src
-    if fn.startswith('BUCKGEN:') :
-      fn = src[8:]
-      tx = [':' + fn]
+    # We have two cases: regular source files and generated files.
+    # Generated files are passed as targets ':foo', and ':' is removed.
+    # 1. regular files: cmd = '-s foo', srcs = ['foo']
+    # 2. generated files: cmd = '-s $(location :foo)', srcs = []
+    srcs = [src]
+    passed_src = fn
+    if fn.startswith(':') :
+      fn = src[1:]
+      srcs = []
+      passed_src = '$(location :%s)' % fn
     ex = fn + EXPN
 
     genrule(
       name = ex,
       cmd = '$(exe :replace_macros) --suffix=' + EXPN +
-            ' -s $SRCDIR/%s' % fn +
+            ' -s ' + passed_src +
             ' -o $OUT',
-      srcs = [src],
-      deps = tx + [':replace_macros'],
+      srcs = srcs,
       out = ex,
     )
-    newdeps.append(':' + ex)
-    newsrcs.append(genfile(ex))
+
+    asciidoc.append('$(location :%s)' % ex)
 
   genrule(
     name = name,
     cmd = ' '.join(asciidoc),
     srcs = newsrcs,
-    deps = newdeps,
     out = out,
     visibility = visibility,
   )

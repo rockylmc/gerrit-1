@@ -49,7 +49,7 @@ public class RebaseIfNecessary extends SubmitStrategy {
     super(args);
     this.patchSetInfoFactory = patchSetInfoFactory;
     this.rebaseChange = rebaseChange;
-    this.newCommits = new HashMap<Change.Id, CodeReviewCommit>();
+    this.newCommits = new HashMap<>();
   }
 
   @Override
@@ -92,7 +92,7 @@ public class RebaseIfNecessary extends SubmitStrategy {
 
             List<PatchSetApproval> approvals = Lists.newArrayList();
             for (PatchSetApproval a : args.approvalsUtil.byPatchSet(
-                args.db, n.notes(), n.getPatchsetId())) {
+                args.db, n.getControl(), n.getPatchsetId())) {
               approvals.add(new PatchSetApproval(newPatchSet.getId(), a));
             }
             // rebaseChange.rebase() may already have copied some approvals,

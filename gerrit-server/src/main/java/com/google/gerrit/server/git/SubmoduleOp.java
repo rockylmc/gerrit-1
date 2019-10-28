@@ -14,6 +14,7 @@
 
 package com.google.gerrit.server.git;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.gerrit.common.ChangeHooks;
 import com.google.gerrit.common.Nullable;
@@ -118,7 +119,7 @@ public class SubmoduleOp {
     this.account = account;
     this.changeHooks = changeHooks;
 
-    updatedSubscribers = new HashSet<Branch.NameKey>();
+    updatedSubscribers = new HashSet<>();
   }
 
   public void update() throws SubmoduleException {
@@ -159,14 +160,13 @@ public class SubmoduleOp {
                 destBranch.get());
 
         final Set<SubmoduleSubscription> oldSubscriptions =
-            new HashSet<SubmoduleSubscription>(schema.submoduleSubscriptions()
+            new HashSet<>(schema.submoduleSubscriptions()
                 .bySuperProject(destBranch).toList());
         final List<SubmoduleSubscription> newSubscriptions =
             new SubmoduleSectionParser(bbc, thisServer, target, repoManager)
                 .parseAllSections();
 
-        final Set<SubmoduleSubscription> alreadySubscribeds =
-            new HashSet<SubmoduleSubscription>();
+        final Set<SubmoduleSubscription> alreadySubscribeds = new HashSet<>();
         for (SubmoduleSubscription s : newSubscriptions) {
           if (oldSubscriptions.contains(s)) {
             alreadySubscribeds.add(s);
@@ -241,12 +241,10 @@ public class SubmoduleOp {
               log.error("Possible circular subscription involving " + s);
             } else {
 
-              Map<Branch.NameKey, ObjectId> modules =
-                  new HashMap<Branch.NameKey, ObjectId>(1);
+            Map<Branch.NameKey, ObjectId> modules = new HashMap<>(1);
               modules.put(updatedBranch, mergedCommit);
 
-              Map<Branch.NameKey, String> paths =
-                  new HashMap<Branch.NameKey, String>(1);
+            Map<Branch.NameKey, String> paths = new HashMap<>(1);
               paths.put(updatedBranch, s.getPath());
               updateGitlinks(s.getSuperProject(), myRw, modules, paths, msgbuf);
             }
@@ -298,8 +296,13 @@ public class SubmoduleOp {
         msgbuf.append(me.getKey().getParentKey().get());
         msgbuf.append("  ").append(me.getValue().getName());
         msgbuf.append("\n");
-        if (modules.size() == 1 && msg != null) {
-          msgbuf.append(msg);
+        if (modules.size() == 1) {
+          if (!Strings.isNullOrEmpty(msg)) {
+            msgbuf.append(msg);
+          } else {
+            msgbuf.append("\n");
+            msgbuf.append(c.getFullMessage());
+          }
         } else {
           msgbuf.append(c.getShortMessage());
         }

@@ -29,13 +29,14 @@ import com.google.gerrit.server.util.TimeUtil;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.sql.Timestamp;
 import java.util.Collections;
 
+@Singleton
 class PutDraft implements RestModifyView<DraftResource, Input> {
   static class Input {
-    String kind;
     String id;
     String path;
     Side side;
@@ -49,10 +50,10 @@ class PutDraft implements RestModifyView<DraftResource, Input> {
   }
 
   private final Provider<ReviewDb> db;
-  private final Provider<DeleteDraft> delete;
+  private final DeleteDraft delete;
 
   @Inject
-  PutDraft(Provider<ReviewDb> db, Provider<DeleteDraft> delete) {
+  PutDraft(Provider<ReviewDb> db, DeleteDraft delete) {
     this.db = db;
     this.delete = delete;
   }
@@ -62,9 +63,7 @@ class PutDraft implements RestModifyView<DraftResource, Input> {
       BadRequestException, OrmException {
     PatchLineComment c = rsrc.getComment();
     if (in == null || in.message == null || in.message.trim().isEmpty()) {
-      return delete.get().apply(rsrc, null);
-    } else if (in.kind != null && !"gerritcodereview#comment".equals(in.kind)) {
-      throw new BadRequestException("expected kind gerritcodereview#comment");
+      return delete.apply(rsrc, null);
     } else if (in.id != null && !rsrc.getId().equals(in.id)) {
       throw new BadRequestException("id must match URL");
     } else if (in.line != null && in.line < 0) {

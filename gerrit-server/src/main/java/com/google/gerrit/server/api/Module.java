@@ -24,5 +24,6 @@ public class Module extends AbstractModule {
 
     install(new com.google.gerrit.server.api.changes.Module());
     install(new com.google.gerrit.server.api.projects.Module());
+    install(new com.google.gerrit.server.api.accounts.Module());
   }
 }

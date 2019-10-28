@@ -43,10 +43,12 @@ import com.google.gerrit.server.util.TimeUtil;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.util.List;
 import java.util.Map;
 
+@Singleton
 public class AddMembers implements RestModifyView<GroupResource, Input> {
   public static class Input {
     @DefaultInput
@@ -75,20 +77,20 @@ public class AddMembers implements RestModifyView<GroupResource, Input> {
 
   private final AccountManager accountManager;
   private final AuthType authType;
-  private final Provider<AccountsCollection> accounts;
+  private final AccountsCollection accounts;
   private final AccountResolver accountResolver;
   private final AccountCache accountCache;
   private final AccountInfo.Loader.Factory infoFactory;
-  private final ReviewDb db;
+  private final Provider<ReviewDb> db;
 
   @Inject
   AddMembers(AccountManager accountManager,
       AuthConfig authConfig,
-      Provider<AccountsCollection> accounts,
+      AccountsCollection accounts,
       AccountResolver accountResolver,
       AccountCache accountCache,
       AccountInfo.Loader.Factory infoFactory,
-      ReviewDb db) {
+      Provider<ReviewDb> db) {
     this.accountManager = accountManager;
     this.authType = authConfig.getAuthType();
     this.accounts = accounts;
@@ -129,7 +131,7 @@ public class AddMembers implements RestModifyView<GroupResource, Input> {
       if (!newAccountGroupMembers.containsKey(a.getId())) {
         AccountGroupMember.Key key =
             new AccountGroupMember.Key(a.getId(), internalGroup.getId());
-        AccountGroupMember m = db.accountGroupMembers().get(key);
+        AccountGroupMember m = db.get().accountGroupMembers().get(key);
         if (m == null) {
           m = new AccountGroupMember(key);
           newAccountGroupMembers.put(m.getAccountId(), m);
@@ -140,8 +142,8 @@ public class AddMembers implements RestModifyView<GroupResource, Input> {
       result.add(loader.get(a.getId()));
     }
 
-    db.accountGroupMembersAudit().insert(newAccountGroupMemberAudits);
-    db.accountGroupMembers().insert(newAccountGroupMembers.values());
+    db.get().accountGroupMembersAudit().insert(newAccountGroupMemberAudits);
+    db.get().accountGroupMembers().insert(newAccountGroupMembers.values());
     for (AccountGroupMember m : newAccountGroupMembers.values()) {
       accountCache.evict(m.getAccountId());
     }
@@ -153,7 +155,7 @@ public class AddMembers implements RestModifyView<GroupResource, Input> {
   private Account findAccount(String nameOrEmail) throws AuthException,
       UnprocessableEntityException, OrmException {
     try {
-      return accounts.get().parse(nameOrEmail).getAccount();
+      return accounts.parse(nameOrEmail).getAccount();
     } catch (UnprocessableEntityException e) {
       // might be because the account does not exist or because the account is
       // not visible
@@ -194,10 +196,10 @@ public class AddMembers implements RestModifyView<GroupResource, Input> {
     static class Input {
     }
 
-    private final Provider<AddMembers> put;
+    private final AddMembers put;
     private final String id;
 
-    PutMember(Provider<AddMembers> put, String id) {
+    PutMember(AddMembers put, String id) {
       this.put = put;
       this.id = id;
     }
@@ -208,7 +210,7 @@ public class AddMembers implements RestModifyView<GroupResource, Input> {
         UnprocessableEntityException, OrmException {
       AddMembers.Input in = new AddMembers.Input();
       in._oneMember = id;
-      List<AccountInfo> list = put.get().apply(resource, in);
+      List<AccountInfo> list = put.apply(resource, in);
       if (list.size() == 1) {
         return list.get(0);
       }
@@ -216,14 +218,15 @@ public class AddMembers implements RestModifyView<GroupResource, Input> {
     }
   }
 
+  @Singleton
   static class UpdateMember implements RestModifyView<MemberResource, PutMember.Input> {
     static class Input {
     }
 
-    private final Provider<GetMember> get;
+    private final GetMember get;
 
     @Inject
-    UpdateMember(Provider<GetMember> get) {
+    UpdateMember(GetMember get) {
       this.get = get;
     }
 
@@ -231,7 +234,7 @@ public class AddMembers implements RestModifyView<GroupResource, Input> {
     public AccountInfo apply(MemberResource resource, PutMember.Input input)
         throws OrmException {
       // Do nothing, the user is already a member.
-      return get.get().apply(resource);
+      return get.apply(resource);
     }
   }
 }

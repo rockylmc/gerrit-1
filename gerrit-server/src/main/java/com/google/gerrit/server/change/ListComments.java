@@ -16,15 +16,23 @@ package com.google.gerrit.server.change;
 
 import com.google.gerrit.reviewdb.client.PatchLineComment;
 import com.google.gerrit.reviewdb.server.ReviewDb;
+import com.google.gerrit.server.PatchLineCommentsUtil;
 import com.google.gerrit.server.account.AccountInfo;
+import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
+@Singleton
 class ListComments extends ListDrafts {
+  private final PatchLineCommentsUtil plcUtil;
+
   @Inject
-  ListComments(Provider<ReviewDb> db, AccountInfo.Loader.Factory alf) {
+  ListComments(Provider<ReviewDb> db, AccountInfo.Loader.Factory alf,
+      PatchLineCommentsUtil plcUtil) {
     super(db, alf);
+    this.plcUtil = plcUtil;
   }
 
   @Override
@@ -34,7 +42,7 @@ class ListComments extends ListDrafts {
 
   protected Iterable<PatchLineComment> listComments(RevisionResource rsrc)
       throws OrmException {
-    return db.get().patchComments()
-        .publishedByPatchSet(rsrc.getPatchSet().getId());
+    ChangeNotes notes = rsrc.getNotes();
+    return plcUtil.publishedByPatchSet(db.get(), notes, rsrc.getPatchSet().getId());
   }
 }

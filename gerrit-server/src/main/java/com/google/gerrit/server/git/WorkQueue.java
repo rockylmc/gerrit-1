@@ -15,6 +15,7 @@
 package com.google.gerrit.server.git;
 
 import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.ListenableFutureTask;
 import com.google.gerrit.extensions.events.LifecycleListener;
 import com.google.gerrit.lifecycle.LifecycleModule;
 import com.google.gerrit.reviewdb.client.Project.NameKey;
@@ -28,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.Thread.UncaughtExceptionHandler;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -90,10 +92,14 @@ public class WorkQueue {
   private final CopyOnWriteArrayList<Executor> queues;
 
   @Inject
-  WorkQueue(final IdGenerator idGenerator, @GerritServerConfig final Config cfg) {
+  WorkQueue(IdGenerator idGenerator, @GerritServerConfig Config cfg) {
+    this(idGenerator, cfg.getInt("execution", "defaultThreadPoolSize", 1));
+  }
+
+  public WorkQueue(IdGenerator idGenerator, int defaultThreadPoolSize) {
     this.idGenerator = idGenerator;
-    this.queues = new CopyOnWriteArrayList<Executor>();
-    defaultQueueSize = cfg.getInt("execution", "defaultThreadPoolSize", 1);
+    this.queues = new CopyOnWriteArrayList<>();
+    this.defaultQueueSize = defaultThreadPoolSize;
   }
 
   /** Get the default work queue, for miscellaneous tasks. */
@@ -115,7 +121,7 @@ public class WorkQueue {
 
   /** Get all of the tasks currently scheduled in any work queue. */
   public List<Task<?>> getTasks() {
-    final List<Task<?>> r = new ArrayList<Task<?>>();
+    final List<Task<?>> r = new ArrayList<>();
     for (final Executor e : queues) {
       e.addAllTo(r);
     }
@@ -182,7 +188,7 @@ public class WorkQueue {
         }
       });
 
-      all = new ConcurrentHashMap<Integer, Task<?>>( //
+      all = new ConcurrentHashMap<>( //
           corePoolSize << 1, // table size
           0.75f, // load factor
           corePoolSize + 4 // concurrency level
@@ -203,9 +209,9 @@ public class WorkQueue {
         Task<V> task;
 
         if (runnable instanceof ProjectRunnable) {
-          task = new ProjectTask<V>((ProjectRunnable) runnable, r, this, id);
+          task = new ProjectTask<>((ProjectRunnable) runnable, r, this, id);
         } else {
-          task = new Task<V>(runnable, r, this, id);
+          task = new Task<>(runnable, r, this, id);
         }
 
         if (all.putIfAbsent(task.getTaskId(), task) == null) {
@@ -374,6 +380,26 @@ public class WorkQueue {
 
     @Override
     public String toString() {
+      //This is a workaround to be able to print a proper name when the task
+      //is wrapped into a ListenableFutureTask.
+      if (runnable instanceof ListenableFutureTask<?>) {
+        String errorMessage;
+        try {
+          for (Field field : ListenableFutureTask.class.getSuperclass()
+              .getDeclaredFields()) {
+            if (field.getType().isAssignableFrom(Callable.class)) {
+              field.setAccessible(true);
+              return ((Callable<?>) field.get(runnable)).toString();
+            }
+          }
+          errorMessage = "Cannot find wrapped Callable field";
+        } catch (SecurityException | IllegalArgumentException
+            | IllegalAccessException e) {
+          errorMessage = "Cannot call toString on Callable field";
+        }
+        log.debug("Cannot get a proper name for ListenableFutureTask: {}",
+            errorMessage);
+      }
       return runnable.toString();
     }
   }

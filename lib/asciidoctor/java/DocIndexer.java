@@ -51,7 +51,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 public class DocIndexer {
-  private static final Version LUCENE_VERSION = Version.LUCENE_46;
+  private static final Version LUCENE_VERSION = Version.LUCENE_48;
   private static final Pattern SECTION_HEADER = Pattern.compile("^=+ (.*)");
 
   @Option(name = "-o", usage = "output JAR file")
@@ -67,7 +67,7 @@ public class DocIndexer {
   private String outExt = ".html";
 
   @Argument(usage = "input files")
-  private List<String> inputFiles = new ArrayList<String>();
+  private List<String> inputFiles = new ArrayList<>();
 
   private void invoke(String... parameters) throws IOException {
     CmdLineParser parser = new CmdLineParser(this);
@@ -104,6 +104,9 @@ public class DocIndexer {
     IndexWriter iwriter = new IndexWriter(directory, config);
     for (String inputFile : inputFiles) {
       File file = new File(inputFile);
+      if (file.length() == 0) {
+        continue;
+      }
 
       BufferedReader titleReader = new BufferedReader(
           new InputStreamReader(new FileInputStream(file), "UTF-8"));

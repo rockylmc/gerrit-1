@@ -20,17 +20,15 @@ import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gwtorm.server.OrmException;
 import com.google.gwtorm.server.SchemaFactory;
 import com.google.inject.Inject;
+import com.google.inject.Singleton;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
 
+@Singleton
 public class ReloadSubmitQueueOp extends DefaultQueueOp {
-  public interface Factory {
-    ReloadSubmitQueueOp create();
-  }
-
   private static final Logger log =
       LoggerFactory.getLogger(ReloadSubmitQueueOp.class);
 
@@ -46,7 +44,7 @@ public class ReloadSubmitQueueOp extends DefaultQueueOp {
   }
 
   public void run() {
-    final HashSet<Branch.NameKey> pending = new HashSet<Branch.NameKey>();
+    final HashSet<Branch.NameKey> pending = new HashSet<>();
     try {
       final ReviewDb c = schema.open();
       try {

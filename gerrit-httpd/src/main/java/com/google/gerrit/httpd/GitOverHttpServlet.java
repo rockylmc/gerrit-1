@@ -33,6 +33,7 @@ import com.google.gerrit.server.git.ReceivePackInitializer;
 import com.google.gerrit.server.git.TagCache;
 import com.google.gerrit.server.git.TransferConfig;
 import com.google.gerrit.server.git.VisibleRefFilter;
+import com.google.gerrit.server.git.validators.UploadValidators;
 import com.google.gerrit.server.project.NoSuchProjectException;
 import com.google.gerrit.server.project.ProjectControl;
 import com.google.inject.AbstractModule;
@@ -51,6 +52,8 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.PostReceiveHook;
 import org.eclipse.jgit.transport.PostReceiveHookChain;
+import org.eclipse.jgit.transport.PreUploadHook;
+import org.eclipse.jgit.transport.PreUploadHookChain;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.UploadPack;
 import org.eclipse.jgit.transport.resolver.ReceivePackFactory;
@@ -188,10 +191,12 @@ public class GitOverHttpServlet extends GitServlet {
 
   static class UploadFactory implements UploadPackFactory<HttpServletRequest> {
     private final TransferConfig config;
+    private final DynamicSet<PreUploadHook> preUploadHooks;
 
     @Inject
-    UploadFactory(TransferConfig tc) {
+    UploadFactory(TransferConfig tc, DynamicSet<PreUploadHook> preUploadHooks) {
       this.config = tc;
+      this.preUploadHooks = preUploadHooks;
     }
 
     @Override
@@ -199,6 +204,8 @@ public class GitOverHttpServlet extends GitServlet {
       UploadPack up = new UploadPack(repo);
       up.setPackConfig(config.getPackConfig());
       up.setTimeout(config.getTimeout());
+      up.setPreUploadHook(PreUploadHookChain.newChain(
+          Lists.newArrayList(preUploadHooks)));
       return up;
     }
   }
@@ -207,12 +214,15 @@ public class GitOverHttpServlet extends GitServlet {
     private final Provider<ReviewDb> db;
     private final TagCache tagCache;
     private final ChangeCache changeCache;
+    private final UploadValidators.Factory uploadValidatorsFactory;
 
     @Inject
-    UploadFilter(Provider<ReviewDb> db, TagCache tagCache, ChangeCache changeCache) {
+    UploadFilter(Provider<ReviewDb> db, TagCache tagCache, ChangeCache changeCache,
+        UploadValidators.Factory uploadValidatorsFactory) {
       this.db = db;
       this.tagCache = tagCache;
       this.changeCache = changeCache;
+      this.uploadValidatorsFactory = uploadValidatorsFactory;
     }
 
     @Override
@@ -229,9 +239,15 @@ public class GitOverHttpServlet extends GitServlet {
             "upload-pack not permitted on this server");
         return;
       }
-
+      // We use getRemoteHost() here instead of getRemoteAddr() because REMOTE_ADDR
+      // may have been overridden by a proxy server -- we'll try to avoid this.
+      UploadValidators uploadValidators =
+          uploadValidatorsFactory.create(pc.getProject(), repo, request.getRemoteHost());
+      up.setPreUploadHook(PreUploadHookChain.newChain(
+          Lists.newArrayList(up.getPreUploadHook(), uploadValidators)));
       if (!pc.allRefsAreVisible()) {
-        up.setAdvertiseRefsHook(new VisibleRefFilter(tagCache, changeCache, repo, pc, db.get(), true));
+        up.setAdvertiseRefsHook(new VisibleRefFilter(tagCache, changeCache,
+            repo, pc, db.get(), true));
       }
 
       next.doFilter(request, response);
@@ -356,7 +372,7 @@ public class GitOverHttpServlet extends GitServlet {
 
       if (isGet) {
         cache.put(cacheKey, Collections.unmodifiableSet(
-            new HashSet<ObjectId>(rp.getAdvertisedObjects())));
+            new HashSet<>(rp.getAdvertisedObjects())));
       }
     }
 

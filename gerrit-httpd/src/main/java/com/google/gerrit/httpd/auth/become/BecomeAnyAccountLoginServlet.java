@@ -16,10 +16,10 @@ package com.google.gerrit.httpd.auth.become;
 
 import static com.google.gerrit.reviewdb.client.AccountExternalId.SCHEME_USERNAME;
 
-import com.google.common.base.Objects;
-import com.google.common.base.Strings;
 import com.google.gerrit.common.PageLinks;
+import com.google.gerrit.extensions.registration.DynamicItem;
 import com.google.gerrit.httpd.HtmlDomUtil;
+import com.google.gerrit.httpd.LoginUrlToken;
 import com.google.gerrit.httpd.WebSession;
 import com.google.gerrit.httpd.template.SiteHeaderFooter;
 import com.google.gerrit.reviewdb.client.Account;
@@ -34,7 +34,6 @@ import com.google.gwtorm.server.OrmException;
 import com.google.gwtorm.server.ResultSet;
 import com.google.gwtorm.server.SchemaFactory;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 import com.google.inject.Singleton;
 
 import org.w3c.dom.Document;
@@ -59,12 +58,12 @@ class BecomeAnyAccountLoginServlet extends HttpServlet {
   private static final boolean IS_DEV = Boolean.getBoolean("Gerrit.GwtDevMode");
 
   private final SchemaFactory<ReviewDb> schema;
-  private final Provider<WebSession> webSession;
+  private final DynamicItem<WebSession> webSession;
   private final AccountManager accountManager;
   private final SiteHeaderFooter headers;
 
   @Inject
-  BecomeAnyAccountLoginServlet(final Provider<WebSession> ws,
+  BecomeAnyAccountLoginServlet(final DynamicItem<WebSession> ws,
       final SchemaFactory<ReviewDb> sf,
       final AccountManager am,
       final ServletContext servletContext,
@@ -121,9 +120,8 @@ class BecomeAnyAccountLoginServlet extends HttpServlet {
     if (res != null) {
       webSession.get().login(res, false);
       final StringBuilder rdr = new StringBuilder();
-      rdr.append(Objects.firstNonNull(
-          Strings.emptyToNull(req.getContextPath()),
-          "/"));
+      rdr.append(req.getContextPath());
+      rdr.append("/");
       if (IS_DEV && req.getParameter("gwt.codesvr") != null) {
         if (rdr.indexOf("?") < 0) {
           rdr.append("?");
@@ -132,11 +130,12 @@ class BecomeAnyAccountLoginServlet extends HttpServlet {
         }
         rdr.append("gwt.codesvr=").append(req.getParameter("gwt.codesvr"));
       }
-      rdr.append('#');
+
       if (res.isNew()) {
-        rdr.append(PageLinks.REGISTER);
+        rdr.append('#' + PageLinks.REGISTER);
+      } else {
+        rdr.append(LoginUrlToken.getToken(req));
       }
-      rdr.append(PageLinks.MINE);
       rsp.sendRedirect(rdr.toString());
 
     } else {

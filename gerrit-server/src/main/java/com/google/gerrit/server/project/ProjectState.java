@@ -30,9 +30,9 @@ import com.google.gerrit.common.data.LabelType;
 import com.google.gerrit.common.data.LabelTypes;
 import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRule;
+import com.google.gerrit.extensions.common.InheritableBoolean;
 import com.google.gerrit.reviewdb.client.AccountGroup;
 import com.google.gerrit.reviewdb.client.Project;
-import com.google.gerrit.reviewdb.client.Project.InheritableBoolean;
 import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.rules.PrologEnvironment;
 import com.google.gerrit.rules.RulesCache;
@@ -41,6 +41,7 @@ import com.google.gerrit.server.account.CapabilityCollection;
 import com.google.gerrit.server.account.GroupMembership;
 import com.google.gerrit.server.config.AllProjectsName;
 import com.google.gerrit.server.config.SitePaths;
+import com.google.gerrit.server.git.BranchOrderSection;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.ProjectConfig;
 import com.google.gerrit.server.git.ProjectLevelConfig;
@@ -135,7 +136,7 @@ public class ProjectState {
     if (isAllProjects && !Permission.canBeOnAllProjects(AccessSection.ALL, Permission.OWNER)) {
       localOwners = Collections.emptySet();
     } else {
-      HashSet<AccountGroup.UUID> groups = new HashSet<AccountGroup.UUID>();
+      HashSet<AccountGroup.UUID> groups = new HashSet<>();
       AccessSection all = config.getAccessSection(AccessSection.ALL);
       if (all != null) {
         Permission owner = all.getPermission(Permission.OWNER);
@@ -255,7 +256,7 @@ public class ProjectState {
     List<SectionMatcher> sm = localAccessSections;
     if (sm == null) {
       Collection<AccessSection> fromConfig = config.getAccessSections();
-      sm = new ArrayList<SectionMatcher>(fromConfig.size());
+      sm = new ArrayList<>(fromConfig.size());
       for (AccessSection section : fromConfig) {
         if (isAllProjects) {
           List<Permission> copy =
@@ -444,6 +445,16 @@ public class ProjectState {
       }
     }
     return ImmutableList.copyOf(cls.values());
+  }
+
+  public BranchOrderSection getBranchOrderSection() {
+    for (ProjectState s : tree()) {
+      BranchOrderSection section = s.getConfig().getBranchOrderSection();
+      if (section != null) {
+        return section;
+      }
+    }
+    return null;
   }
 
   public ThemeInfo getTheme() {

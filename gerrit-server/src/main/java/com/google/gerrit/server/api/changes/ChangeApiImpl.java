@@ -41,7 +41,7 @@ import com.google.inject.assistedinject.Assisted;
 import java.io.IOException;
 import java.util.EnumSet;
 
-class ChangeApiImpl implements ChangeApi {
+class ChangeApiImpl extends ChangeApi.NotImplemented implements ChangeApi {
   interface Factory {
     ChangeApiImpl create(ChangeResource change);
   }
@@ -50,21 +50,21 @@ class ChangeApiImpl implements ChangeApi {
   private final Revisions revisions;
   private final RevisionApiImpl.Factory revisionApi;
   private final ChangeResource change;
-  private final Provider<Abandon> abandon;
-  private final Provider<Revert> revert;
-  private final Provider<Restore> restore;
+  private final Abandon abandon;
+  private final Revert revert;
+  private final Restore restore;
   private final Provider<PostReviewers> postReviewers;
-  private final ChangeJson changeJson;
+  private final Provider<ChangeJson> changeJson;
 
   @Inject
   ChangeApiImpl(Changes changeApi,
       Revisions revisions,
       RevisionApiImpl.Factory revisionApi,
-      Provider<Abandon> abandon,
-      Provider<Revert> revert,
-      Provider<Restore> restore,
+      Abandon abandon,
+      Revert revert,
+      Restore restore,
       Provider<PostReviewers> postReviewers,
-      ChangeJson changeJson,
+      Provider<ChangeJson> changeJson,
       @Assisted ChangeResource change) {
     this.changeApi = changeApi;
     this.revert = revert;
@@ -110,7 +110,7 @@ class ChangeApiImpl implements ChangeApi {
   @Override
   public void abandon(AbandonInput in) throws RestApiException {
     try {
-      abandon.get().apply(change, in);
+      abandon.apply(change, in);
     } catch (OrmException | IOException e) {
       throw new RestApiException("Cannot abandon change", e);
     }
@@ -124,7 +124,7 @@ class ChangeApiImpl implements ChangeApi {
   @Override
   public void restore(RestoreInput in) throws RestApiException {
     try {
-      restore.get().apply(change, in);
+      restore.apply(change, in);
     } catch (OrmException | IOException e) {
       throw new RestApiException("Cannot restore change", e);
     }
@@ -138,7 +138,7 @@ class ChangeApiImpl implements ChangeApi {
   @Override
   public ChangeApi revert(RevertInput in) throws RestApiException {
     try {
-      return changeApi.id(revert.get().apply(change, in)._number);
+      return changeApi.id(revert.apply(change, in)._number);
     } catch (OrmException | EmailException | IOException e) {
       throw new RestApiException("Cannot revert change", e);
     }
@@ -164,8 +164,8 @@ class ChangeApiImpl implements ChangeApi {
   public ChangeInfo get(EnumSet<ListChangesOption> s)
       throws RestApiException {
     try {
-      return new ChangeInfoMapper(s).map(
-          changeJson.addOptions(s).format(change));
+      return ChangeInfoMapper.INSTANCE.apply(
+          changeJson.get().addOptions(s).format(change));
     } catch (OrmException e) {
       throw new RestApiException("Cannot retrieve change", e);
     }

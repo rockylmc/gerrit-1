@@ -72,6 +72,7 @@ import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
@@ -114,9 +115,14 @@ public class LuceneChangeIndex implements ChangeIndex {
 
   public static final String CHANGES_OPEN = "open";
   public static final String CHANGES_CLOSED = "closed";
-  private static final String ID_FIELD = ChangeField.LEGACY_ID.getName();
-  private static final String CHANGE_FIELD = ChangeField.CHANGE.getName();
+
+  private static final String ADDED_FIELD = ChangeField.ADDED.getName();
   private static final String APPROVAL_FIELD = ChangeField.APPROVAL.getName();
+  private static final String CHANGE_FIELD = ChangeField.CHANGE.getName();
+  private static final String DELETED_FIELD = ChangeField.DELETED.getName();
+  private static final String ID_FIELD = ChangeField.LEGACY_ID.getName();
+  private static final ImmutableSet<String> FIELDS = ImmutableSet.of(
+      ADDED_FIELD, APPROVAL_FIELD, CHANGE_FIELD, DELETED_FIELD, ID_FIELD);
 
   private static final Map<Schema<ChangeData>, Version> LUCENE_VERSIONS;
   static {
@@ -126,14 +132,22 @@ public class LuceneChangeIndex implements ChangeIndex {
     Version lucene43 = Version.LUCENE_43;
     @SuppressWarnings("deprecation")
     Version lucene44 = Version.LUCENE_44;
+    @SuppressWarnings("deprecation")
+    Version lucene46 = Version.LUCENE_46;
+    @SuppressWarnings("deprecation")
+    Version lucene47 = Version.LUCENE_47;
     for (Map.Entry<Integer, Schema<ChangeData>> e
         : ChangeSchemas.ALL.entrySet()) {
       if (e.getKey() <= 3) {
         versions.put(e.getValue(), lucene43);
       } else if (e.getKey() <= 5) {
         versions.put(e.getValue(), lucene44);
+      } else if (e.getKey() <= 8) {
+        versions.put(e.getValue(), lucene46);
+      } else if (e.getKey() <= 10) {
+        versions.put(e.getValue(), lucene47);
       } else {
-        versions.put(e.getValue(), Version.LUCENE_46);
+        versions.put(e.getValue(), Version.LUCENE_48);
       }
     }
     LUCENE_VERSIONS = versions.build();
@@ -361,9 +375,6 @@ public class LuceneChangeIndex implements ChangeIndex {
     setReady(sitePaths, schema.getVersion(), ready);
   }
 
-  private static final ImmutableSet<String> FIELDS =
-      ImmutableSet.of(ID_FIELD, CHANGE_FIELD, APPROVAL_FIELD);
-
   @SuppressWarnings("deprecation")
   private static Sort getSort(Schema<ChangeData> schema,
       Predicate<ChangeData> p) {
@@ -473,10 +484,12 @@ public class LuceneChangeIndex implements ChangeIndex {
       return changeDataFactory.create(db.get(), new Change.Id(id));
     }
 
+    // Change proto.
     Change change = ChangeProtoField.CODEC.decode(
         cb.bytes, cb.offset, cb.length);
     ChangeData cd = changeDataFactory.create(db.get(), change);
 
+    // Approvals.
     BytesRef[] approvalsBytes = doc.getBinaryValues(APPROVAL_FIELD);
     if (approvalsBytes != null) {
       List<PatchSetApproval> approvals =
@@ -487,6 +500,16 @@ public class LuceneChangeIndex implements ChangeIndex {
       }
       cd.setCurrentApprovals(approvals);
     }
+
+    // Changed lines.
+    IndexableField added = doc.getField(ADDED_FIELD);
+    IndexableField deleted = doc.getField(DELETED_FIELD);
+    if (added != null && deleted != null) {
+      cd.setChangedLines(
+          added.numericValue().intValue(),
+          deleted.numericValue().intValue());
+    }
+
     return cd;
   }
 
@@ -510,7 +533,7 @@ public class LuceneChangeIndex implements ChangeIndex {
     FieldType<?> type = values.getField().getType();
     Store store = store(values.getField());
 
-    if (type == FieldType.INTEGER) {
+    if (type == FieldType.INTEGER || type == FieldType.INTEGER_RANGE) {
       for (Object value : values.getValues()) {
         doc.add(new IntField(name, (Integer) value, store));
       }

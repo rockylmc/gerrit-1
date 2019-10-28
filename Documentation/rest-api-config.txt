@@ -30,6 +30,515 @@ Returns the version of the Gerrit server.
   "2.7"
 ----
 
+[[list-caches]]
+=== List Caches
+--
+'GET /config/server/caches/'
+--
+
+Lists the caches of the server. Caches defined by plugins are included.
+
+The caller must be a member of a group that is granted the
+link:access-control.html#capability_viewCaches[View Caches] capability
+or the link:access-control.html#capability_administrateServer[
+Administrate Server] capability.
+
+As result a map of link:#cache-info[CacheInfo] entities is returned.
+
+The entries in the map are sorted by cache name.
+
+.Request
+----
+  GET /config/server/caches/ HTTP/1.0
+----
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "accounts": {
+      "type": "MEM",
+      "entries": {
+        "mem": 4
+      },
+      "average_get": "2.5ms",
+      "hit_ratio": {
+        "mem": 94
+      }
+    },
+    "accounts_byemail": {
+      "type": "MEM",
+      "entries": {
+        "mem": 4
+      },
+      "average_get": "771.8us",
+      "hit_ratio": {
+        "mem": 95
+      }
+    },
+    "accounts_byname": {
+      "type": "MEM",
+      "entries": {
+        "mem": 4
+      },
+      "hit_ratio": {
+        "mem": 100
+      }
+    },
+    "adv_bases": {
+      "type": "MEM",
+      "entries": {},
+      "hit_ratio": {}
+    },
+    "change_kind": {
+      "type": "DISK",
+      "entries": {
+        "space": "0.00k"
+      },
+      "hit_ratio": {}
+    },
+    "changes": {
+      "type": "MEM",
+      "entries": {},
+      "hit_ratio": {}
+    },
+    "conflicts": {
+      "type": "DISK",
+      "entries": {
+        "mem": 2,
+        "disk": 3,
+        "space": "2.75k"
+      },
+      "hit_ratio": {
+        "mem": 0,
+        "disk": 100
+      }
+    },
+    "diff": {
+      "type": "DISK",
+      "entries": {
+        "mem": 177,
+        "disk": 253,
+        "space": "170.97k"
+      },
+      "average_get": "1.1ms",
+      "hit_ratio": {
+        "mem": 67,
+        "disk": 100
+      }
+    },
+    "diff_intraline": {
+      "type": "DISK",
+      "entries": {
+        "mem": 1,
+        "disk": 1,
+        "space": "0.37k"
+      },
+      "average_get": "6.8ms",
+      "hit_ratio": {
+        "mem": 0
+      }
+    },
+    "git_tags": {
+      "type": "DISK",
+      "entries": {
+        "space": "0.00k"
+      },
+      "hit_ratio": {}
+    },
+    groups": {
+      "type": "MEM",
+      "entries": {
+        "mem": 27
+      },
+      "average_get": "183.2us",
+      "hit_ratio": {
+        "mem": 12
+      }
+    },
+    "groups_byinclude": {
+      "type": "MEM",
+      "entries": {},
+      "hit_ratio": {}
+    },
+    "groups_byname": {
+      "type": "MEM",
+      "entries": {},
+      "hit_ratio": {}
+    },
+    "groups_byuuid": {
+      "type": "MEM",
+      "entries": {
+        "mem": 25
+      },
+      "average_get": "173.4us",
+      "hit_ratio": {
+        "mem": 13
+      }
+    },
+    "groups_external": {
+      "type": "MEM",
+      "entries": {},
+      "hit_ratio": {}
+    },
+    groups_members": {
+      "type": "MEM",
+      "entries": {
+        "mem": 4
+      },
+      "average_get": "697.8us",
+      "hit_ratio": {
+        "mem": 82
+      }
+    },
+    "permission_sort": {
+      "type": "MEM",
+      "entries": {
+        "mem": 16
+      },
+      "hit_ratio": {
+        "mem": 96
+      }
+    },
+    "plugin_resources": {
+      "type": "MEM",
+      "entries": {
+        "mem": 2
+      },
+      "hit_ratio": {
+        "mem": 83
+      }
+    },
+    "project_list": {
+      "type": "MEM",
+      "entries": {
+        "mem": 1
+      },
+      "average_get": "18.6ms",
+      "hit_ratio": {
+        "mem": 0
+      }
+    },
+    "projects": {
+      "type": "MEM",
+      "entries": {
+        "mem": 35
+      },
+      "average_get": "8.6ms",
+      "hit_ratio": {
+        "mem": 99
+      }
+    },
+    "quota-repo_size": {
+      "type": "DISK",
+      "entries": {
+        "space": "0.00k"
+      },
+      "hit_ratio": {}
+    },
+    "sshkeys": {
+      "type": "MEM",
+      "entries": {
+        "mem": 1
+      },
+      "average_get": "3.2ms",
+      "hit_ratio": {
+        "mem": 50
+      }
+    },
+    "web_sessions": {
+      "type": "DISK",
+      "entries": {
+        "mem": 1,
+        "disk": 2,
+        "space": "0.78k"
+      },
+      "hit_ratio": {
+        "mem": 82
+      }
+    }
+  }
+----
+
+It is possible to get different output formats by specifying the
+`format` option:
+
+* `LIST`:
++
+Returns the cache names as JSON list.
++
+The cache names are alphabetically sorted.
++
+.Request
+----
+  GET /config/server/caches/?format=LIST HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  [
+    "accounts",
+    "accounts_byemail",
+    "accounts_byname",
+    "adv_bases",
+    "change_kind",
+    "changes",
+    "conflicts",
+    "diff",
+    "diff_intraline",
+    "git_tags",
+    "groups",
+    "groups_byinclude",
+    "groups_byname",
+    "groups_byuuid",
+    "groups_external",
+    "groups_members",
+    "permission_sort",
+    "plugin_resources",
+    "project_list",
+    "projects",
+    "quota-repo_size",
+    "sshkeys",
+    "web_sessions"
+  ]
+----
+
+* `TEXT_LIST`:
++
+Returns the cache names as a UTF-8 list that is base64 encoded. The
+cache names are delimited by '\n'.
++
+The cache names are lexicographically sorted.
++
+.Request
+----
+  GET /config/server/caches/?format=TEXT_LIST HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Type: text/plain;charset=UTF-8
+
+  YWNjb3VudHMKYW...ViX3Nlc3Npb25z
+----
++
+E.g. this could be used to flush all caches:
++
+----
+  for c in $(curl --digest --user jdoe:TNAuLkXsIV7w http://gerrit/a/config/server/caches/?format=TEXT_LIST | base64 -D)
+  do
+    curl --digest --user jdoe:TNAuLkXsIV7w -X POST http://gerrit/a/config/server/caches/$c/flush
+  done
+----
+
+[[cache-operations]]
+=== Cache Operations
+--
+'POST /config/server/caches/'
+--
+
+Executes a cache operation that is specified in the request body in a
+link:#cache-operation-input[CacheOperationInput] entity.
+
+[[flush-all-caches]]
+==== Flush All Caches
+
+.Request
+----
+  POST /config/server/caches/ HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  {
+    "operation": "FLUSH_ALL"
+  }
+----
+
+.Response
+----
+  HTTP/1.1 200 OK
+----
+
+[[flush-several-caches]]
+==== Flush Several Caches At Once
+
+.Request
+----
+  POST /config/server/caches/ HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  {
+    "operation": "FLUSH"
+    "caches": [
+      "projects",
+      "project_list"
+    ]
+  }
+----
+
+.Response
+----
+  HTTP/1.1 200 OK
+----
+
+[[get-cache]]
+=== Get Cache
+--
+'GET /config/server/caches/link:#cache-name[\{cache-name\}]'
+--
+
+Retrieves information about a cache.
+
+The caller must be a member of a group that is granted the
+link:access-control.html#capability_viewCaches[View Caches] capability
+or the link:access-control.html#capability_administrateServer[
+Administrate Server] capability.
+
+As result a link:#cache-info[CacheInfo] entity is returned.
+
+.Request
+----
+  GET /config/server/caches/projects HTTP/1.0
+----
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "name": "projects",
+    "type": "MEM",
+    "entries": {
+      "mem": 35
+    },
+    "average_get": " 8.6ms",
+    "hit_ratio": {
+      "mem": 99
+    }
+  }
+----
+
+[[flush-cache]]
+=== Flush Cache
+--
+'POST /config/server/caches/link:#cache-name[\{cache-name\}]/flush'
+--
+
+Flushes a cache.
+
+The caller must be a member of a group that is granted the
+link:access-control.html#capability_flushCaches[Flush Caches] capability
+or the link:access-control.html#capability_administrateServer[
+Administrate Server] capability.
+
+The "web_sessions" cache can only be flushed if the caller is member of
+a group that is granted the
+link:access-control.html#capability_administrateServer[Administrate
+Server] capability.
+
+.Request
+----
+  POST /config/server/caches/projects/flush HTTP/1.0
+----
+
+.Response
+----
+  HTTP/1.1 200 OK
+----
+
+[[get-summary]]
+=== Get Summary
+--
+'GET /config/server/summary'
+--
+
+Retrieves a summary of the current server state.
+
+The caller must be a member of a group that is granted the
+link:access-control.html#capability_administrateServer[Administrate
+Server] capability.
+
+The following options are supported:
+
+* `jvm`:
++
+Includes a JVM summary.
+
+* `gc`:
++
+Requests a Java garbage collection before computing the information
+about the Java memory heap.
+
+.Request
+----
+  GET /config/server/summary?jvm HTTP/1.0
+----
+
+As result a link:#summary-info[SummaryInfo] entity is returned.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "task_summary": {
+      "total": 2,
+      "sleeping": 2
+    },
+    "mem_summary": {
+      "total": "341.06m",
+      "used": "57.16m",
+      "free": "283.90m",
+      "buffers": "0.00k",
+      "max": "1.67g",
+    }
+    "thread_summary": {
+      "cpus": 8,
+      "threads": 44,
+      "counts": {
+        "HTTP": {
+          "RUNNABLE": 3,
+          "TIMED_WAITING": 2
+        },
+        "SSH-Interactive-Worker": {
+          "WAITING": 1
+        },
+        "Other": {
+          "WAITING": 10,
+          "RUNNABLE": 2,
+          "TIMED_WAITING": 25
+        },
+        "SshCommandStart": {
+          "WAITING": 1
+        }
+      }
+    },
+    "jvm_summary": {
+      "vm_vendor": "Oracle Corporation",
+      "vm_name": "Java HotSpot(TM) 64-Bit Server VM",
+      "vm_version": "23.25-b01",
+      "os_name": "Mac OS X",
+      "os_version": "10.8.5",
+      "os_arch": "x86_64",
+      "user": "gerrit",
+      "host": "GERRIT",
+      "current_working_directory": "/Users/gerrit/site",
+      "site": "/Users/gerrit/site"
+    }
+  }
+----
+
 [[list-capabilities]]
 === List Capabilities
 --
@@ -57,86 +566,202 @@ The entries in the map are sorted by capability ID.
   )]}'
   {
     "accessDatabase": {
-      "kind": "gerritcodereview#capability",
       "id": "accessDatabase",
       "name": "Access Database"
     },
     "administrateServer": {
-      "kind": "gerritcodereview#capability",
       "id": "administrateServer",
       "name": "Administrate Server"
     },
     "createAccount": {
-      "kind": "gerritcodereview#capability",
       "id": "createAccount",
       "name": "Create Account"
     },
     "createGroup": {
-      "kind": "gerritcodereview#capability",
       "id": "createGroup",
       "name": "Create Group"
     },
     "createProject": {
-      "kind": "gerritcodereview#capability",
       "id": "createProject",
       "name": "Create Project"
     },
     "emailReviewers": {
-      "kind": "gerritcodereview#capability",
       "id": "emailReviewers",
       "name": "Email Reviewers"
     },
     "flushCaches": {
-      "kind": "gerritcodereview#capability",
       "id": "flushCaches",
       "name": "Flush Caches"
     },
     "killTask": {
-      "kind": "gerritcodereview#capability",
       "id": "killTask",
       "name": "Kill Task"
     },
     "priority": {
-      "kind": "gerritcodereview#capability",
       "id": "priority",
       "name": "Priority"
     },
     "queryLimit": {
-      "kind": "gerritcodereview#capability",
       "id": "queryLimit",
       "name": "Query Limit"
     },
     "runGC": {
-      "kind": "gerritcodereview#capability",
       "id": "runGC",
       "name": "Run Garbage Collection"
     },
     "streamEvents": {
-      "kind": "gerritcodereview#capability",
       "id": "streamEvents",
       "name": "Stream Events"
     },
     "viewCaches": {
-      "kind": "gerritcodereview#capability",
       "id": "viewCaches",
       "name": "View Caches"
     },
     "viewConnections": {
-      "kind": "gerritcodereview#capability",
       "id": "viewConnections",
       "name": "View Connections"
     },
     "viewPlugins": {
-      "kind": "gerritcodereview#capability",
       "id": "viewPlugins",
       "name": "View Plugins"
     },
     "viewQueue": {
-      "kind": "gerritcodereview#capability",
       "id": "viewQueue",
       "name": "View Queue"
     }
   }
+----
+
+[[list-tasks]]
+=== List Tasks
+--
+'GET /config/server/tasks/'
+--
+
+Lists the tasks from the background work queues that the Gerrit daemon
+is currently performing, or will perform in the near future.
+
+Gerrit contains an internal scheduler, similar to cron, that it uses to
+queue and dispatch both short and long term tasks.
+
+Tasks that are completed or canceled exit the queue very quickly once
+they enter this state, but it can be possible to observe tasks in these
+states.
+
+End-users may see a task only if they can also see the project the task
+is associated with. Tasks operating on other projects, or that do not
+have a specific project, are hidden.
+
+Members of a group that is granted the
+link:access-control.html#capability_viewQueue[View Queue] capability or
+the link:access-control.html#capability_administrateServer[Administrate
+Server] capability can see all tasks.
+
+As result a list of link:#task-info[TaskInfo] entities is returned.
+
+The entries in the list are sorted by task state, remaining delay and
+command.
+
+.Request
+----
+  GET /config/server/tasks/ HTTP/1.0
+----
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  [
+    {
+      "id": "1e688bea",
+      "state": "SLEEPING",
+      "start_time": "2014-06-11 12:58:51.991000000",
+      "delay": 3453,
+      "command": "Reload Submit Queue"
+    },
+    {
+      "id": "3e6d4ffa",
+      "state": "SLEEPING",
+      "start_time": "2014-06-11 12:58:51.508000000",
+      "delay": 3287966,
+      "command": "Log File Compressor"
+    }
+  ]
+----
+
+[[get-task]]
+=== Get Task
+--
+'GET /config/server/tasks/link:#task-id[\{task-id\}]'
+--
+
+Retrieves a task from the background work queue that the Gerrit daemon
+is currently performing, or will perform in the near future.
+
+End-users may see a task only if they can also see the project the task
+is associated with. Tasks operating on other projects, or that do not
+have a specific project, are hidden.
+
+Members of a group that is granted the
+link:access-control.html#capability_viewQueue[View Queue] capability or
+the link:access-control.html#capability_administrateServer[Administrate
+Server] capability can see all tasks.
+
+As result a link:#task-info[TaskInfo] entity is returned.
+
+.Request
+----
+  GET /config/server/tasks/1e688bea HTTP/1.0
+----
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "id": "1e688bea",
+    "state": "SLEEPING",
+    "start_time": "2014-06-11 12:58:51.991000000",
+    "delay": 3453,
+    "command": "Reload Submit Queue"
+  }
+----
+
+[[delete-task]]
+=== Delete Task
+--
+'DELETE /config/server/tasks/link:#task-id[\{task-id\}]'
+--
+
+Kills a task from the background work queue that the Gerrit daemon
+is currently performing, or will perform in the near future.
+
+The caller must be a member of a group that is granted the
+link:access-control.html#capability_kill[Kill Task] capability
+or the link:access-control.html#capability_administrateServer[
+Administrate Server] capability.
+
+End-users may see a task only if they can also see the project the task
+is associated with. Tasks operating on other projects, or that do not
+have a specific project, are hidden.
+
+Members of a group that is granted the
+link:access-control.html#capability_viewQueue[View Queue] capability or
+the link:access-control.html#capability_administrateServer[Administrate
+Server] capability can see all tasks.
+
+.Request
+----
+  DELETE /config/server/tasks/1e688bea HTTP/1.0
+----
+
+.Response
+----
+  HTTP/1.1 204 No Content
 ----
 
 [[get-top-menus]]
@@ -176,8 +801,51 @@ link:#top-menu-entry-info[TopMenuEntryInfo] entities is returned.
 ----
 
 
+[[ids]]
+== IDs
+
+[[cache-name]]
+=== \{cache-name\}
+The name of the cache.
+
+If the cache is defined by a plugin the cache name must include the
+plugin name: "<plugin-name>-<cache-name>".
+
+Gerrit core caches can optionally be prefixed with "gerrit":
+"gerrit-<cache-name>".
+
+[[task-id]]
+=== \{task-id\}
+The ID of the task (hex string).
+
+
 [[json-entities]]
 == JSON Entities
+
+[[cache-info]]
+=== CacheInfo
+The `CacheInfo` entity contains information about a cache.
+
+[options="header",width="50%",cols="1,^1,5"]
+|==================================
+|Field Name           ||Description
+|`name`               |
+not set if returned in a map where the cache name is used as map key|
+The cache name. If the cache is defined by a plugin the cache name
+includes the plugin name: "<plugin-name>-<cache-name>".
+|`type`               ||
+The type of the cache (`MEM`: in memory cache, `DISK`: disk cache).
+|`entries`            ||
+Information about the entries in the cache as a
+link:#entries-info[EntriesInfo] entity.
+|`average_get`        |optional|
+The average duration of getting one entry from the cache. The value is
+returned with a standard time unit abbreviation (`ns`: nanoseconds,
+`us`: microseconds, `ms`: milliseconds, `s`: seconds).
+|`hit_ratio`          ||
+Information about the hit ratio as a link:#hit-ration-info[
+HitRatioInfo] entity.
+|==================================
 
 [[capability-info]]
 === CapabilityInfo
@@ -186,10 +854,194 @@ The `CapabilityInfo` entity contains information about a capability.
 [options="header",width="50%",cols="1,6"]
 |=================================
 |Field Name           |Description
-|`kind`               |`gerritcodereview#capability`
 |`id`                 |capability ID
 |`name`               |capability name
 |=================================
+
+[[cache-operation-input]]
+=== CacheOperationInput
+The `CacheOperationInput` entity contains information about an
+operation that should be executed on caches.
+
+[options="header",width="50%",cols="1,^1,5"]
+|==================================
+|Field Name           ||Description
+|`operation`          ||
+The cache operation that should be executed:
+
+`FLUSH_ALL`: Flushes all caches, except the `web_sessions` cache.
+
+`FLUSH`: Flushes the specified caches.
+|`caches`             |optional|
+A list of cache names. This list defines the caches on which the
+specified operation should be executed. Whether this list must be
+specified depends on the operation being executed.
+|==================================
+
+[[entries-info]]
+=== EntriesInfo
+The `EntriesInfo` entity contains information about the entries in a
+cache.
+
+[options="header",width="50%",cols="1,^1,5"]
+|==================================
+|Field Name ||Description
+|`mem`      |optional|Number of cache entries that are held in memory.
+|`disk`     |optional|Number of cache entries on the disk. For non-disk
+caches this value is not set; for disk caches it is only set if there
+are entries in the cache.
+|`space`    |optional|
+The space that is consumed by the cache on disk. The value is returned
+with a unit abbreviation (`k`: kilobytes, `m`: megabytes,
+`g`: gigabytes). Only set for disk caches.
+|==================================
+
+[[hit-ration-info]]
+=== HitRatioInfo
+The `HitRatioInfo` entity contains information about the hit ratio of a
+cache.
+
+[options="header",width="50%",cols="1,^1,5"]
+|==================================
+|Field Name ||Description
+|`mem`      ||
+Hit ratio for cache entries that are held in memory (0 \<= value \<= 100).
+|`disk`     |optional|
+Hit ratio for cache entries that are held on disk (0 \<= value \<= 100).
+Only set for disk caches.
+|==================================
+
+[[jvm-summary-info]]
+=== JvmSummaryInfo
+The `JvmSummaryInfo` entity contains information about the JVM.
+
+[options="header",width="50%",cols="1,^1,5"]
+|========================================
+|Field Name                 ||Description
+|`vm_vendor`                ||The vendor of the virtual machine.
+|`vm_name`                  ||The name of the virtual machine.
+|`vm_version`               ||The version of the virtual machine.
+|`os_name`                  ||The name of the operating system.
+|`os_version`               ||The version of the operating system.
+|`os_arch`                  ||The architecture of the operating system.
+|`user`                     ||The user that is running Gerrit.
+|`host`                     |optional|
+The host on which Gerrit is running.
+|`current_working_directory`||The current working directory.
+|`site`                     ||The path to the review site.
+|========================================
+
+[[mem-summary-info]]
+=== MemSummaryInfo
+The `MemSummaryInfo` entity contains information about the current
+memory usage.
+
+[options="header",width="50%",cols="1,^1,5"]
+|============================
+|Field Name     ||Description
+|`total`        ||
+The total size of the memory. The value is returned with a unit
+abbreviation (`k`: kilobytes, `m`: megabytes, `g`: gigabytes).
+|`used`         ||
+The size of used memory. The value is returned with a unit abbreviation
+(`k`: kilobytes, `m`: megabytes, `g`: gigabytes).
+|`free`         ||
+The size of free memory. The value is returned with a unit abbreviation
+(`k`: kilobytes, `m`: megabytes, `g`: gigabytes).
+|`buffers`      ||
+The size of memory used for JGit buffers. The value is returned with a
+unit abbreviation (`k`: kilobytes, `m`: megabytes, `g`: gigabytes).
+|`max`          ||
+The maximal memory size. The value is returned with a unit abbreviation
+(`k`: kilobytes, `m`: megabytes, `g`: gigabytes).
+|`open_files`   |optional|
+The number of open files.
+|============================
+
+[[summary-info]]
+=== SummaryInfo
+The `SummaryInfo` entity contains information about the current state
+of the server.
+
+[options="header",width="50%",cols="1,^1,5"]
+|============================
+|Field Name     ||Description
+|`task_summary` ||
+Summary about current tasks as a link:#task-summary-info[
+TaskSummaryInfo] entity.
+|`mem_summary`  ||
+Summary about current memory usage as a link:#mem-summary-info[
+MemSummaryInfo] entity.
+|`thread_summary`  ||
+Summary about current threads as a link:#thread-summary-info[
+ThreadSummaryInfo] entity.
+|`jvm_summary`  |optional|
+Summary about the JVM link:#jvm-summary-info[JvmSummaryInfo] entity.
+Only set if the `jvm` option was set.
+|============================
+
+[[task-info]]
+=== TaskInfo
+The `TaskInfo` entity contains information about a task in a background
+work queue.
+
+[options="header",width="50%",cols="1,^1,5"]
+|====================================
+|Field Name   ||Description
+|`id`         ||The ID of the task.
+|`state`      ||
+The state of the task, can be `DONE`, `CANCELLED`, `RUNNING`, `READY`,
+`SLEEPING` and `OTHER`.
+|`start_time` ||The start time of the task.
+|`delay`      ||The remaining delay of the task.
+|`command`    ||The command of the task.
+|`remote_name`|optional|
+The remote name. May only be set for tasks that are associated with a
+project.
+|`project`    |optional|The project the task is associated with.
+|====================================
+
+[[task-summary-info]]
+=== TaskSummaryInfo
+The `TaskSummaryInfo` entity contains information about the current
+tasks.
+
+[options="header",width="50%",cols="1,^1,5"]
+|============================
+|Field Name     ||Description
+|`total`        |optional|
+Total number of current tasks.
+|`running`      |optional|
+Number of currently running tasks.
+|`ready`        |optional|
+Number of currently ready tasks.
+|`sleeping`     |optional|
+Number of currently sleeping tasks.
+|============================
+
+[[thread-summary-info]]
+=== ThreadSummaryInfo
+The `ThreadSummaryInfo` entity contains information about the current
+threads.
+
+[options="header",width="50%",cols="1,6"]
+|===========================
+|Field Name     |Description
+|`cpus`         |
+The number of available processors.
+|`threads`      |
+The total number of current threads.
+|`counts`       |
+Detailed thread counts as a map that maps a thread kind to a map that
+maps a thread state to the thread count. The thread kinds group the
+counts by threads that have the same name prefix (`HTTP`,
+`IntraLineDiff`, `ReceiveCommits`, `SSH git-receive-pack`,
+`SSH git-upload-pack`, `SSH-Interactive-Worker`, `SSH-Stream-Worker`,
+`SshCommandStart`). The counts for other threads are available under
+the thread kind `Other`. Counts for the following thread states can be
+included: `NEW`, `RUNNABLE`, `BLOCKED`, `WAITING`, `TIMED_WAITING` and
+`TERMINATED`.
+|===========================
 
 [[top-menu-entry-info]]
 === TopMenuEntryInfo

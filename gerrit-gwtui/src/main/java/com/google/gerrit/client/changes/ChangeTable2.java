@@ -19,6 +19,7 @@ import static com.google.gerrit.client.FormatUtil.shortFormat;
 
 import com.google.gerrit.client.Gerrit;
 import com.google.gerrit.client.changes.ChangeInfo.LabelInfo;
+import com.google.gerrit.client.account.AccountInfo;
 import com.google.gerrit.client.ui.AccountLinkPanel;
 import com.google.gerrit.client.ui.BranchLink;
 import com.google.gerrit.client.ui.ChangeLink;
@@ -26,12 +27,12 @@ import com.google.gerrit.client.ui.NavigationTable;
 import com.google.gerrit.client.ui.NeedsSignInKeyCommand;
 import com.google.gerrit.client.ui.ProjectLink;
 import com.google.gerrit.common.PageLinks;
+import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.ReviewCategoryStrategy;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gwt.dom.client.Element;
 import com.google.gwt.event.dom.client.ClickEvent;
 import com.google.gwt.event.dom.client.ClickHandler;
 import com.google.gwt.event.dom.client.KeyPressEvent;
-import com.google.gwt.user.client.DOM;
 import com.google.gwt.user.client.ui.FlexTable.FlexCellFormatter;
 import com.google.gwt.user.client.ui.FlowPanel;
 import com.google.gwt.user.client.ui.HTMLTable.Cell;
@@ -48,14 +49,16 @@ import java.util.List;
 
 public class ChangeTable2 extends NavigationTable<ChangeInfo> {
   private static final int C_STAR = 1;
-  private static final int C_SUBJECT = 2;
-  private static final int C_STATUS = 3;
-  private static final int C_OWNER = 4;
-  private static final int C_PROJECT = 5;
-  private static final int C_BRANCH = 6;
-  private static final int C_LAST_UPDATE = 7;
-  private static final int C_SIZE = 8;
-  private static final int BASE_COLUMNS = 9;
+  private static final int C_ID = 2;
+  private static final int C_SUBJECT = 3;
+  private static final int C_STATUS = 4;
+  private static final int C_OWNER = 5;
+  private static final int C_PROJECT = 6;
+  private static final int C_BRANCH = 7;
+  private static final int C_LAST_UPDATE = 8;
+  private static final int C_SIZE = 9;
+  private static final int BASE_COLUMNS = 10;
+
 
   private final boolean useNewFeatures = Gerrit.getConfig().getNewFeatures();
   private final List<Section> sections;
@@ -73,6 +76,7 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
 
     sections = new ArrayList<>();
     table.setText(0, C_STAR, "");
+    table.setText(0, C_ID, Util.C.changeTableColumnID());
     table.setText(0, C_SUBJECT, Util.C.changeTableColumnSubject());
     table.setText(0, C_STATUS, Util.C.changeTableColumnStatus());
     table.setText(0, C_OWNER, Util.C.changeTableColumnOwner());
@@ -85,8 +89,14 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
 
     final FlexCellFormatter fmt = table.getFlexCellFormatter();
     fmt.addStyleName(0, C_STAR, Gerrit.RESOURCES.css().iconHeader());
-    for (int i = C_SUBJECT; i < columns; i++) {
+    for (int i = C_ID; i < columns; i++) {
       fmt.addStyleName(0, i, Gerrit.RESOURCES.css().dataHeader());
+    }
+
+    if (!Gerrit.isSignedIn() ||
+       (!Gerrit.getUserAccount().getGeneralPreferences()
+         .isLegacycidInChangeTable())) {
+      fmt.addStyleName(0, C_ID, Gerrit.RESOURCES.css().dataHeaderHidden());
     }
 
     table.addClickHandler(new ClickHandler() {
@@ -139,13 +149,19 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
     super.applyDataRowStyle(row);
     final CellFormatter fmt = table.getCellFormatter();
     fmt.addStyleName(row, C_STAR, Gerrit.RESOURCES.css().iconCell());
-    for (int i = C_SUBJECT; i < columns; i++) {
+    for (int i = C_ID; i < columns; i++) {
       fmt.addStyleName(row, i, Gerrit.RESOURCES.css().dataCell());
     }
     fmt.addStyleName(row, C_SUBJECT, Gerrit.RESOURCES.css().cSUBJECT());
     fmt.addStyleName(row, C_STATUS, Gerrit.RESOURCES.css().cSTATUS());
     fmt.addStyleName(row, C_OWNER, Gerrit.RESOURCES.css().cOWNER());
     fmt.addStyleName(row, C_LAST_UPDATE, Gerrit.RESOURCES.css().cLastUpdate());
+
+    if (!Gerrit.isSignedIn() ||
+       (!Gerrit.getUserAccount().getGeneralPreferences()
+         .isLegacycidInChangeTable())) {
+      fmt.addStyleName(row, C_ID, Gerrit.RESOURCES.css().dataCellHidden());
+    }
 
     int i = C_SIZE;
     if (useNewFeatures) {
@@ -183,11 +199,8 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
       String name = labelNames.get(i);
       int col = baseColumns + i;
 
-      StringBuilder abbrev = new StringBuilder();
-      for (String t : name.split("-")) {
-        abbrev.append(t.substring(0, 1).toUpperCase());
-      }
-      table.setText(0, col, abbrev.toString());
+      String abbrev = getAbbreviation(name, "-");
+      table.setText(0, col, abbrev);
       table.getCellFormatter().getElement(0, col).setTitle(name);
       fmt.addStyleName(0, col, Gerrit.RESOURCES.css().dataHeader());
     }
@@ -207,6 +220,7 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
           c.legacy_id(),
           c.starred()));
     }
+    table.setWidget(row, C_ID, new TableChangeLink(String.valueOf(c.legacy_id()), c));
 
     String subject = Util.cropSubject(c.subject());
     table.setWidget(row, C_SUBJECT, new TableChangeLink(subject, c));
@@ -249,8 +263,8 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
       col++;
     }
 
-    boolean displayName = Gerrit.isSignedIn() && Gerrit.getUserAccount()
-        .getGeneralPreferences().isShowUsernameInReviewCategory();
+    boolean displayInfo = Gerrit.isSignedIn() && Gerrit.getUserAccount()
+        .getGeneralPreferences().isShowInfoInReviewCategory();
 
     for (int idx = 0; idx < labelNames.size(); idx++, col++) {
       String name = labelNames.get(idx);
@@ -263,39 +277,52 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
       }
 
       String user;
+      String info;
+      ReviewCategoryStrategy reviewCategoryStrategy = Gerrit.isSignedIn()
+          ? Gerrit.getUserAccount().getGeneralPreferences()
+                .getReviewCategoryStrategy()
+          : ReviewCategoryStrategy.NONE;
       if (label.rejected() != null) {
         user = label.rejected().name();
-        if (displayName && user != null) {
+        info = getReviewCategoryDisplayInfo(reviewCategoryStrategy,
+            label.rejected());
+        if (displayInfo && info != null) {
           FlowPanel panel = new FlowPanel();
           panel.add(new Image(Gerrit.RESOURCES.redNot()));
-          panel.add(new InlineLabel(user));
+          panel.add(new InlineLabel(info));
           table.setWidget(row, col, panel);
         } else {
           table.setWidget(row, col, new Image(Gerrit.RESOURCES.redNot()));
         }
       } else if (label.approved() != null) {
         user = label.approved().name();
-        if (displayName && user != null) {
+        info = getReviewCategoryDisplayInfo(reviewCategoryStrategy,
+            label.approved());
+        if (displayInfo && info != null) {
           FlowPanel panel = new FlowPanel();
           panel.add(new Image(Gerrit.RESOURCES.greenCheck()));
-          panel.add(new InlineLabel(user));
+          panel.add(new InlineLabel(info));
           table.setWidget(row, col, panel);
         } else {
           table.setWidget(row, col, new Image(Gerrit.RESOURCES.greenCheck()));
         }
       } else if (label.disliked() != null) {
         user = label.disliked().name();
+        info = getReviewCategoryDisplayInfo(reviewCategoryStrategy,
+            label.disliked());
         String vstr = String.valueOf(label._value());
-        if (displayName && user != null) {
-          vstr = vstr + " " + user;
+        if (displayInfo && info != null) {
+          vstr = vstr + " " + info;
         }
         fmt.addStyleName(row, col, Gerrit.RESOURCES.css().negscore());
         table.setText(row, col, vstr);
       } else if (label.recommended() != null) {
         user = label.recommended().name();
+        info = getReviewCategoryDisplayInfo(reviewCategoryStrategy,
+            label.recommended());
         String vstr = "+" + label._value();
-        if (displayName && user != null) {
-          vstr = vstr + " " + user;
+        if (displayInfo && info != null) {
+          vstr = vstr + " " + info;
         }
         fmt.addStyleName(row, col, Gerrit.RESOURCES.css().posscore());
         table.setText(row, col, vstr);
@@ -305,7 +332,8 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
       }
       fmt.addStyleName(row, col, Gerrit.RESOURCES.css().singleLine());
 
-      if (!displayName && user != null) {
+      if ((!displayInfo || reviewCategoryStrategy == ReviewCategoryStrategy.ABBREV)
+          && user != null) {
         // Some web browsers ignore the embedded newline; some like it;
         // so we include a space before the newline to accommodate both.
         fmt.getElement(row, col).setTitle(name + " \nby " + user);
@@ -316,11 +344,37 @@ public class ChangeTable2 extends NavigationTable<ChangeInfo> {
     if (highlightUnreviewed && !c.reviewed()) {
       needHighlight = true;
     }
-    final Element tr = DOM.getParent(fmt.getElement(row, 0));
+    final Element tr = fmt.getElement(row, 0).getParentElement();
     UIObject.setStyleName(tr, Gerrit.RESOURCES.css().needsReview(),
         needHighlight);
 
     setRowItem(row, c);
+  }
+
+  private static String getReviewCategoryDisplayInfo(
+      ReviewCategoryStrategy reviewCategoryStrategy, AccountInfo accountInfo) {
+    switch (reviewCategoryStrategy) {
+      case NAME:
+        return accountInfo.name();
+      case EMAIL:
+        return accountInfo.email();
+      case USERNAME:
+        return accountInfo.username();
+      case ABBREV:
+        return getAbbreviation(accountInfo.name(), " ");
+      default:
+        return null;
+    }
+  }
+
+  private static String getAbbreviation(String name, String token) {
+    StringBuilder abbrev = new StringBuilder();
+    if (name != null) {
+      for (String t : name.split(token)) {
+        abbrev.append(t.substring(0, 1).toUpperCase());
+      }
+    }
+    return abbrev.toString();
   }
 
   private static Widget getSizeWidget(ChangeInfo c) {

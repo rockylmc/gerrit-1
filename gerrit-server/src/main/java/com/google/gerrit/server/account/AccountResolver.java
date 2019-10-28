@@ -21,6 +21,7 @@ import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -29,6 +30,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@Singleton
 public class AccountResolver {
   private final Realm realm;
   private final AccountByEmailCache byEmail;
@@ -179,7 +181,7 @@ public class AccountResolver {
     // At this point we have no clue. Just perform a whole bunch of suggestions
     // and pray we come up with a reasonable result list.
     //
-    Set<Account.Id> result = new HashSet<Account.Id>();
+    Set<Account.Id> result = new HashSet<>();
     String a = nameOrEmail;
     String b = nameOrEmail + "\u9fa5";
     for (Account act : schema.get().accounts().suggestByFullName(a, b, 10)) {

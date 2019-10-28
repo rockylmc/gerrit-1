@@ -14,6 +14,7 @@
 
 package com.google.gerrit.client.changes;
 
+import com.google.gerrit.client.WebLinkInfo;
 import com.google.gerrit.client.account.AccountInfo;
 import com.google.gerrit.client.actions.ActionInfo;
 import com.google.gerrit.client.diff.FileInfo;
@@ -161,6 +162,7 @@ public class ChangeInfo extends JavaScriptObject {
 
     public final native boolean optional() /*-{ return this.optional ? true : false; }-*/;
     public final native boolean blocking() /*-{ return this.blocking ? true : false; }-*/;
+    public final native short defaultValue() /*-{ return this.default_value; }-*/;
     final native short _value()
     /*-{
       if (this.value) return this.value;
@@ -218,6 +220,7 @@ public class ChangeInfo extends JavaScriptObject {
 
     public final native boolean has_fetch() /*-{ return this.hasOwnProperty('fetch') }-*/;
     public final native NativeMap<FetchInfo> fetch() /*-{ return this.fetch; }-*/;
+    public final native JsArray<WebLinkInfo> web_links() /*-{ return this.web_links; }-*/;
 
     public static void sortRevisionInfoByNumber(JsArray<RevisionInfo> list) {
       Collections.sort(Natives.asList(list), new Comparator<RevisionInfo>() {

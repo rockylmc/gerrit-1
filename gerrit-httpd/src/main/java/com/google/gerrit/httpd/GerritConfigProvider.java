@@ -14,11 +14,16 @@
 
 package com.google.gerrit.httpd;
 
+import com.google.common.base.Function;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.gerrit.common.data.GerritConfig;
 import com.google.gerrit.common.data.GitwebConfig;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences;
 import com.google.gerrit.server.account.Realm;
+import com.google.gerrit.server.change.ArchiveFormat;
+import com.google.gerrit.server.change.GetArchive;
 import com.google.gerrit.server.config.AllProjectsName;
 import com.google.gerrit.server.config.AnonymousCowardName;
 import com.google.gerrit.server.config.AuthConfig;
@@ -46,6 +51,7 @@ class GerritConfigProvider implements Provider<GerritConfig> {
   private final Config cfg;
   private final AuthConfig authConfig;
   private final DownloadConfig downloadConfig;
+  private final GetArchive.AllowedFormats archiveFormats;
   private final GitWebConfig gitWebConfig;
   private final AllProjectsName wildProject;
   private final SshInfo sshInfo;
@@ -60,11 +66,13 @@ class GerritConfigProvider implements Provider<GerritConfig> {
       final AuthConfig ac, final GitWebConfig gwc, final AllProjectsName wp,
       final SshInfo si, final ContactStore cs,
       final ServletContext sc, final DownloadConfig dc,
+      final GetArchive.AllowedFormats af,
       final @AnonymousCowardName String acn) {
     realm = r;
     cfg = gsc;
     authConfig = ac;
     downloadConfig = dc;
+    archiveFormats = af;
     gitWebConfig = gwc;
     sshInfo = si;
     wildProject = wp;
@@ -86,6 +94,7 @@ class GerritConfigProvider implements Provider<GerritConfig> {
         config.setRegisterUrl(cfg.getString("auth", null, "registerurl"));
         config.setRegisterText(cfg.getString("auth", null, "registertext"));
         config.setEditFullNameUrl(cfg.getString("auth", null, "editFullNameUrl"));
+        config.setHttpPasswordSettingsEnabled(!authConfig.isGitBasicAuth());
         break;
 
       case CUSTOM_EXTENSION:
@@ -103,6 +112,7 @@ class GerritConfigProvider implements Provider<GerritConfig> {
 
       case CLIENT_SSL_CERT_LDAP:
       case DEVELOPMENT_BECOME_ANY_ACCOUNT:
+      case OAUTH:
       case OPENID:
       case OPENID_SSO:
         break;
@@ -127,6 +137,15 @@ class GerritConfigProvider implements Provider<GerritConfig> {
         "gerrit", null, "changeScreen",
         AccountGeneralPreferences.ChangeScreen.CHANGE_SCREEN2));
     config.setLargeChangeSize(cfg.getInt("change", "largeChange", 500));
+    config.setArchiveFormats(Lists.newArrayList(Iterables.transform(
+        archiveFormats.getAllowed(),
+        new Function<ArchiveFormat, String>() {
+          @Override
+          public String apply(ArchiveFormat in) {
+            return in.getShortName();
+          }
+        })));
+
     config.setNewFeatures(cfg.getBoolean("gerrit", "enableNewFeatures", true));
 
     final String reportBugUrl = cfg.getString("gerrit", null, "reportBugUrl");
@@ -134,9 +153,7 @@ class GerritConfigProvider implements Provider<GerritConfig> {
         reportBugUrl : "http://code.google.com/p/gerrit/issues/list");
     config.setReportBugText(cfg.getString("gerrit", null, "reportBugText"));
 
-    config.setGitBasicAuth(authConfig.isGitBasicAuth());
-
-    final Set<Account.FieldName> fields = new HashSet<Account.FieldName>();
+    final Set<Account.FieldName> fields = new HashSet<>();
     for (final Account.FieldName n : Account.FieldName.values()) {
       if (realm.allowsEdit(n)) {
         fields.add(n);

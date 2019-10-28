@@ -54,8 +54,6 @@ public class AuthConfig {
   private final SignedToken emailReg;
   private final SignedToken restToken;
 
-  private final boolean allowGoogleAccountUpgrade;
-
   @Inject
   AuthConfig(@GerritServerConfig final Config cfg)
       throws XsrfException {
@@ -97,13 +95,6 @@ public class AuthConfig {
     } else {
       restToken = null;
     }
-
-    if (authType == AuthType.OPENID) {
-      allowGoogleAccountUpgrade =
-          cfg.getBoolean("auth", "allowgoogleaccountupgrade", false);
-    } else {
-      allowGoogleAccountUpgrade = false;
-    }
   }
 
   private static List<OpenIdProviderPattern> toPatterns(Config cfg, String name) {
@@ -112,7 +103,7 @@ public class AuthConfig {
       s = new String[] {"http://", "https://"};
     }
 
-    List<OpenIdProviderPattern> r = new ArrayList<OpenIdProviderPattern>();
+    List<OpenIdProviderPattern> r = new ArrayList<>();
     for (String pattern : s) {
       r.add(OpenIdProviderPattern.create(pattern));
     }
@@ -172,10 +163,6 @@ public class AuthConfig {
     return restToken;
   }
 
-  public boolean isAllowGoogleAccountUpgrade() {
-    return allowGoogleAccountUpgrade;
-  }
-
   /** OpenID identities which the server permits for authentication. */
   public List<OpenIdProviderPattern> getAllowedOpenIDs() {
     return allowedOpenIDs;
@@ -210,7 +197,7 @@ public class AuthConfig {
       case LDAP_BIND:
       case CLIENT_SSL_CERT_LDAP:
       case CUSTOM_EXTENSION:
-        // Its safe to assume yes for an HTTP authentication type, as the
+      case OAUTH:
         // only way in is through some external system that the admin trusts
         //
         return true;
@@ -237,14 +224,6 @@ public class AuthConfig {
   }
 
   private boolean isTrusted(final AccountExternalId id) {
-    if (id.isScheme(AccountExternalId.LEGACY_GAE)) {
-      // Assume this is a trusted token, its a legacy import from
-      // a fairly well respected provider and only takes effect if
-      // the administrator has the import still enabled
-      //
-      return isAllowGoogleAccountUpgrade();
-    }
-
     if (id.isScheme(AccountExternalId.SCHEME_MAILTO)) {
       // mailto identities are created by sending a unique validation
       // token to the address and asking them to come back to the site
@@ -276,5 +255,10 @@ public class AuthConfig {
 
   public String getRegisterPageUrl() {
     return registerPageUrl;
+  }
+
+  public boolean isLdapAuthType() {
+    return authType == AuthType.LDAP ||
+        authType == AuthType.LDAP_BIND;
   }
 }

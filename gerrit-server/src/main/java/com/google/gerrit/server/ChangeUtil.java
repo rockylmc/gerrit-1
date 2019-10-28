@@ -51,6 +51,7 @@ import com.google.gwtorm.server.OrmConcurrencyException;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.errors.IncorrectObjectTypeException;
 import org.eclipse.jgit.errors.MissingObjectException;
@@ -79,6 +80,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
+@Singleton
 public class ChangeUtil {
   /**
    * Epoch for sort key calculations, Tue Sep 30 2008 17:00:00.
@@ -93,6 +95,10 @@ public class ChangeUtil {
   private static final int SEED = 0x2418e6f9;
   private static int uuidPrefix;
   private static int uuidSeq;
+
+  private static final int SUBJECT_MAX_LENGTH = 80;
+  private static final String SUBJECT_CROP_APPENDIX = "...";
+  private static final int SUBJECT_CROP_RANGE = 10;
 
   private static final Logger log =
       LoggerFactory.getLogger(ChangeUtil.class);
@@ -147,7 +153,7 @@ public class ChangeUtil {
   public static void insertAncestors(ReviewDb db, PatchSet.Id id, RevCommit src)
       throws OrmException {
     int cnt = src.getParentCount();
-    List<PatchSetAncestor> toInsert = new ArrayList<PatchSetAncestor>(cnt);
+    List<PatchSetAncestor> toInsert = new ArrayList<>(cnt);
     for (int p = 0; p < cnt; p++) {
       PatchSetAncestor a =
           new PatchSetAncestor(new PatchSetAncestor.Id(id, p + 1));
@@ -192,6 +198,20 @@ public class ChangeUtil {
   public static PatchSet.Id nextPatchSetId(Repository git, PatchSet.Id id)
       throws IOException {
     return nextPatchSetId(git.getRefDatabase().getRefs(RefDatabase.ALL), id);
+  }
+
+  public static String cropSubject(String subject) {
+    if (subject.length() > SUBJECT_MAX_LENGTH) {
+      int maxLength = SUBJECT_MAX_LENGTH - SUBJECT_CROP_APPENDIX.length();
+      for (int cropPosition = maxLength;
+          cropPosition > maxLength - SUBJECT_CROP_RANGE; cropPosition--) {
+        if (Character.isWhitespace(subject.charAt(cropPosition - 1))) {
+          return subject.substring(0, cropPosition) + SUBJECT_CROP_APPENDIX;
+        }
+      }
+      return subject.substring(0, maxLength) + SUBJECT_CROP_APPENDIX;
+    }
+    return subject;
   }
 
   private final Provider<CurrentUser> userProvider;

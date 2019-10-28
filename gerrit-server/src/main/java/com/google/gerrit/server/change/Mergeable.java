@@ -15,21 +15,23 @@
 package com.google.gerrit.server.change;
 
 import com.google.common.collect.Sets;
+import com.google.gerrit.extensions.common.SubmitType;
 import com.google.gerrit.extensions.restapi.AuthException;
 import com.google.gerrit.extensions.restapi.BadRequestException;
 import com.google.gerrit.extensions.restapi.ResourceConflictException;
 import com.google.gerrit.extensions.restapi.RestReadView;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
-import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.RevId;
 import com.google.gerrit.reviewdb.server.ReviewDb;
+import com.google.gerrit.server.git.BranchOrderSection;
 import com.google.gerrit.server.git.CodeReviewCommit;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.MergeException;
 import com.google.gerrit.server.git.strategy.SubmitStrategyFactory;
 import com.google.gerrit.server.index.ChangeIndexer;
 import com.google.gerrit.server.project.NoSuchProjectException;
+import com.google.gerrit.server.project.ProjectCache;
 import com.google.gwtorm.server.AtomicUpdate;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
@@ -46,12 +48,15 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevFlag;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.kohsuke.args4j.Option;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -59,12 +64,24 @@ public class Mergeable implements RestReadView<RevisionResource> {
   private static final Logger log = LoggerFactory.getLogger(Mergeable.class);
 
   public static class MergeableInfo {
-    public Project.SubmitType submitType;
+    public SubmitType submitType;
     public boolean mergeable;
+    public List<String> mergeableInto;
+  }
+
+  @Option(name = "--other-branches", aliases = {"-o"},
+      usage = "test mergeability for other branches too")
+  private boolean otherBranches;
+
+  @Option(name = "--force", aliases = {"-f"},
+      usage = "force recheck of mergeable field")
+  public void setForce(boolean force) {
+    this.force = force;
   }
 
   private final TestSubmitType.Get submitType;
   private final GitRepositoryManager gitManager;
+  private final ProjectCache projectCache;
   private final SubmitStrategyFactory submitStrategyFactory;
   private final Provider<ReviewDb> db;
   private final ChangeIndexer indexer;
@@ -74,18 +91,16 @@ public class Mergeable implements RestReadView<RevisionResource> {
   @Inject
   Mergeable(TestSubmitType.Get submitType,
       GitRepositoryManager gitManager,
+      ProjectCache projectCache,
       SubmitStrategyFactory submitStrategyFactory,
       Provider<ReviewDb> db,
       ChangeIndexer indexer) {
     this.submitType = submitType;
     this.gitManager = gitManager;
+    this.projectCache = projectCache;
     this.submitStrategyFactory = submitStrategyFactory;
     this.db = db;
     this.indexer = indexer;
-  }
-
-  public void setForce(boolean force) {
-    this.force = force;
   }
 
   @Override
@@ -113,6 +128,24 @@ public class Mergeable implements RestReadView<RevisionResource> {
         result.mergeable =
             refresh(change, ps, result.submitType, git, refs, ref);
       }
+
+      if (otherBranches) {
+        result.mergeableInto = new ArrayList<>();
+        BranchOrderSection branchOrder =
+            projectCache.get(change.getProject()).getBranchOrderSection();
+        if (branchOrder != null) {
+          int prefixLen = Constants.R_HEADS.length();
+          for (String n : branchOrder.getMoreStable(ref.getName())) {
+            Ref other = refs.get(n);
+            if (other == null) {
+              continue;
+            }
+            if (isMergeable(change, ps, SubmitType.CHERRY_PICK, git, refs, other)) {
+              result.mergeableInto.add(other.getName().substring(prefixLen));
+            }
+          }
+        }
+      }
     } finally {
       git.close();
     }
@@ -132,7 +165,37 @@ public class Mergeable implements RestReadView<RevisionResource> {
 
   private boolean refresh(Change change,
       final PatchSet ps,
-      Project.SubmitType type,
+      SubmitType type,
+      Repository git,
+      Map<String, Ref> refs,
+      final Ref ref) throws IOException, OrmException {
+
+    final boolean mergeable = isMergeable(change, ps, type, git, refs, ref);
+
+    Change c = db.get().changes().atomicUpdate(
+        change.getId(),
+        new AtomicUpdate<Change>() {
+          @Override
+          public Change update(Change c) {
+            if (c.getStatus().isOpen()
+                && ps.getId().equals(c.currentPatchSetId())) {
+              c.setMergeable(mergeable);
+              c.setLastSha1MergeTested(toRevId(ref));
+              return c;
+            } else {
+              return null;
+            }
+          }
+        });
+    if (c != null) {
+      indexer.index(db.get(), c);
+    }
+    return mergeable;
+  }
+
+  private boolean isMergeable(Change change,
+      final PatchSet ps,
+      SubmitType type,
       Repository git,
       Map<String, Ref> refs,
       final Ref ref) throws IOException, OrmException {
@@ -175,25 +238,6 @@ public class Mergeable implements RestReadView<RevisionResource> {
             canMerge,
             accepted,
             change.getDest()).dryRun(tip, rev);
-      }
-
-      Change c = db.get().changes().atomicUpdate(
-        change.getId(),
-        new AtomicUpdate<Change>() {
-          @Override
-          public Change update(Change c) {
-            if (c.getStatus().isOpen()
-                && ps.getId().equals(c.currentPatchSetId())) {
-              c.setMergeable(mergeable);
-              c.setLastSha1MergeTested(toRevId(ref));
-              return c;
-            } else {
-              return null;
-            }
-          }
-        });
-      if (c != null) {
-        indexer.index(db.get(), c);
       }
       return mergeable;
     } catch (MergeException | IOException | NoSuchProjectException e) {

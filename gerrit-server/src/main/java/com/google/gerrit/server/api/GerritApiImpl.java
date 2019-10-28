@@ -15,29 +15,39 @@
 package com.google.gerrit.server.api;
 
 import com.google.gerrit.extensions.api.GerritApi;
+import com.google.gerrit.extensions.api.accounts.Accounts;
 import com.google.gerrit.extensions.api.changes.Changes;
 import com.google.gerrit.extensions.api.projects.Projects;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
-class GerritApiImpl implements GerritApi {
-  private final Provider<Changes> changes;
-  private final Provider<Projects> projects;
+@Singleton
+class GerritApiImpl extends GerritApi.NotImplemented implements GerritApi {
+  private final Accounts accounts;
+  private final Changes changes;
+  private final Projects projects;
 
   @Inject
-  GerritApiImpl(Provider<Changes> changes,
-      Provider<Projects> projects) {
+  GerritApiImpl(Accounts accounts,
+      Changes changes,
+      Projects projects) {
+    this.accounts = accounts;
     this.changes = changes;
     this.projects = projects;
   }
 
   @Override
+  public Accounts accounts() {
+    return accounts;
+  }
+
+  @Override
   public Changes changes() {
-    return changes.get();
+    return changes;
   }
 
   @Override
   public Projects projects() {
-    return projects.get();
+    return projects;
   }
 }

@@ -38,10 +38,12 @@ import com.google.gerrit.server.util.TimeUtil;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.util.List;
 import java.util.Map;
 
+@Singleton
 public class AddIncludedGroups implements RestModifyView<GroupResource, Input> {
   public static class Input {
     @DefaultInput
@@ -69,15 +71,15 @@ public class AddIncludedGroups implements RestModifyView<GroupResource, Input> {
     }
   }
 
-  private final Provider<GroupsCollection> groupsCollection;
+  private final GroupsCollection groupsCollection;
   private final GroupIncludeCache groupIncludeCache;
-  private final ReviewDb db;
+  private final Provider<ReviewDb> db;
   private final GroupJson json;
 
   @Inject
-  public AddIncludedGroups(Provider<GroupsCollection> groupsCollection,
+  public AddIncludedGroups(GroupsCollection groupsCollection,
       GroupIncludeCache groupIncludeCache,
-      ReviewDb db, GroupJson json) {
+      Provider<ReviewDb> db, GroupJson json) {
     this.groupsCollection = groupsCollection;
     this.groupIncludeCache = groupIncludeCache;
     this.db = db;
@@ -101,7 +103,7 @@ public class AddIncludedGroups implements RestModifyView<GroupResource, Input> {
     Account.Id me = ((IdentifiedUser) control.getCurrentUser()).getAccountId();
 
     for (String includedGroup : input.groups) {
-      GroupDescription.Basic d = groupsCollection.get().parse(includedGroup);
+      GroupDescription.Basic d = groupsCollection.parse(includedGroup);
       if (!control.canAddGroup(d.getGroupUUID())) {
         throw new AuthException(String.format("Cannot add group: %s",
             d.getName()));
@@ -111,7 +113,7 @@ public class AddIncludedGroups implements RestModifyView<GroupResource, Input> {
         AccountGroupById.Key agiKey =
             new AccountGroupById.Key(group.getId(),
                 d.getGroupUUID());
-        AccountGroupById agi = db.accountGroupById().get(agiKey);
+        AccountGroupById agi = db.get().accountGroupById().get(agiKey);
         if (agi == null) {
           agi = new AccountGroupById(agiKey);
           newIncludedGroups.put(d.getGroupUUID(), agi);
@@ -123,12 +125,12 @@ public class AddIncludedGroups implements RestModifyView<GroupResource, Input> {
     }
 
     if (!newIncludedGroups.isEmpty()) {
-      db.accountGroupByIdAud().insert(newIncludedGroupsAudits);
-      db.accountGroupById().insert(newIncludedGroups.values());
+      db.get().accountGroupByIdAud().insert(newIncludedGroupsAudits);
+      db.get().accountGroupById().insert(newIncludedGroups.values());
       for (AccountGroupById agi : newIncludedGroups.values()) {
-        groupIncludeCache.evictMemberIn(agi.getIncludeUUID());
+        groupIncludeCache.evictParentGroupsOf(agi.getIncludeUUID());
       }
-      groupIncludeCache.evictMembersOf(group.getGroupUUID());
+      groupIncludeCache.evictSubgroupsOf(group.getGroupUUID());
     }
 
     return result;
@@ -138,10 +140,10 @@ public class AddIncludedGroups implements RestModifyView<GroupResource, Input> {
     static class Input {
     }
 
-    private final Provider<AddIncludedGroups> put;
+    private final AddIncludedGroups put;
     private final String id;
 
-    PutIncludedGroup(Provider<AddIncludedGroups> put, String id) {
+    PutIncludedGroup(AddIncludedGroups put, String id) {
       this.put = put;
       this.id = id;
     }
@@ -152,7 +154,7 @@ public class AddIncludedGroups implements RestModifyView<GroupResource, Input> {
         UnprocessableEntityException, OrmException {
       AddIncludedGroups.Input in = new AddIncludedGroups.Input();
       in.groups = ImmutableList.of(id);
-      List<GroupInfo> list = put.get().apply(resource, in);
+      List<GroupInfo> list = put.apply(resource, in);
       if (list.size() == 1) {
         return list.get(0);
       }
@@ -160,6 +162,7 @@ public class AddIncludedGroups implements RestModifyView<GroupResource, Input> {
     }
   }
 
+  @Singleton
   static class UpdateIncludedGroup implements RestModifyView<IncludedGroupResource, PutIncludedGroup.Input> {
     static class Input {
     }

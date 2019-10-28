@@ -81,6 +81,7 @@ public class SearchSuggestOracle extends HighlightSuggestOracle {
     suggestions.add("comment:");
     suggestions.add("conflicts:");
     suggestions.add("project:");
+    suggestions.add("projects:");
     suggestions.add("parentproject:");
     suggestions.add("branch:");
     suggestions.add("topic:");
@@ -101,6 +102,7 @@ public class SearchSuggestOracle extends HighlightSuggestOracle {
     suggestions.add("is:owner");
     suggestions.add("is:reviewer");
     suggestions.add("is:open");
+    suggestions.add("is:pending");
     suggestions.add("is:draft");
     suggestions.add("is:closed");
     suggestions.add("is:submitted");
@@ -110,11 +112,17 @@ public class SearchSuggestOracle extends HighlightSuggestOracle {
 
     suggestions.add("status:");
     suggestions.add("status:open");
+    suggestions.add("status:pending");
     suggestions.add("status:reviewed");
     suggestions.add("status:submitted");
     suggestions.add("status:closed");
     suggestions.add("status:merged");
     suggestions.add("status:abandoned");
+
+    suggestions.add("added:");
+    suggestions.add("deleted:");
+    suggestions.add("delta:");
+    suggestions.add("size:");
 
     suggestions.add("AND");
     suggestions.add("OR");

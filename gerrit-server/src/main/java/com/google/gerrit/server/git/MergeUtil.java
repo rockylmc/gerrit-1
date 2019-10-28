@@ -38,6 +38,7 @@ import com.google.inject.assistedinject.Assisted;
 import com.google.inject.assistedinject.AssistedInject;
 
 import org.eclipse.jgit.errors.IncorrectObjectTypeException;
+import org.eclipse.jgit.errors.LargeObjectException;
 import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.errors.NoMergeBaseException;
 import org.eclipse.jgit.errors.NoMergeBaseException.MergeBaseFailureReason;
@@ -51,6 +52,7 @@ import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.merge.Merger;
+import org.eclipse.jgit.merge.ThreeWayMergeStrategy;
 import org.eclipse.jgit.merge.ThreeWayMerger;
 import org.eclipse.jgit.revwalk.FooterKey;
 import org.eclipse.jgit.revwalk.FooterLine;
@@ -78,22 +80,26 @@ import java.util.Set;
 import java.util.TimeZone;
 
 public class MergeUtil {
+  public static final FooterKey CHANGE_ID = new FooterKey("Change-Id");
+  private static final FooterKey REVIEWED_ON = new FooterKey("Reviewed-on");
   private static final Logger log = LoggerFactory.getLogger(MergeUtil.class);
+  private static final String R_HEADS_MASTER =
+      Constants.R_HEADS + Constants.MASTER;
 
   public static boolean useRecursiveMerge(Config cfg) {
-    return cfg.getBoolean("core", null, "useRecursiveMerge", false);
+    return cfg.getBoolean("core", null, "useRecursiveMerge", true);
+  }
+
+  public static ThreeWayMergeStrategy getMergeStrategy(Config cfg) {
+    return useRecursiveMerge(cfg)
+        ? MergeStrategy.RECURSIVE
+        : MergeStrategy.RESOLVE;
   }
 
   public static interface Factory {
     MergeUtil create(ProjectState project);
     MergeUtil create(ProjectState project, boolean useContentMerge);
   }
-
-  private static final String R_HEADS_MASTER =
-      Constants.R_HEADS + Constants.MASTER;
-
-  private static final FooterKey REVIEWED_ON = new FooterKey("Reviewed-on");
-  private static final FooterKey CHANGE_ID = new FooterKey("Change-Id");
 
   private final Provider<ReviewDb> db;
   private final IdentifiedUser.GenericFactory identifiedUserFactory;
@@ -311,9 +317,9 @@ public class MergeUtil {
     return "Verified".equalsIgnoreCase(id.get());
   }
 
-  private List<PatchSetApproval> safeGetApprovals(CodeReviewCommit n) {
+  private Iterable<PatchSetApproval> safeGetApprovals(CodeReviewCommit n) {
     try {
-      return approvalsUtil.byPatchSet(db.get(), n.notes(), n.getPatchsetId());
+      return approvalsUtil.byPatchSet(db.get(), n.getControl(), n.getPatchsetId());
     } catch (OrmException e) {
       log.error("Can't read approval records for " + n.getPatchsetId(), e);
       return Collections.emptyList();
@@ -360,7 +366,7 @@ public class MergeUtil {
     if (submitter != null) {
       IdentifiedUser who =
           identifiedUserFactory.create(submitter.getAccountId());
-      Set<String> emails = new HashSet<String>();
+      Set<String> emails = new HashSet<>();
       for (RevCommit c : codeReviewCommits) {
         try {
           rw.parseBody(c);
@@ -394,9 +400,12 @@ public class MergeUtil {
       return false;
     }
 
-    final ThreeWayMerger m = newThreeWayMerger(repo, createDryRunInserter(repo));
+    ThreeWayMerger m = newThreeWayMerger(repo, createDryRunInserter(repo));
     try {
       return m.merge(new AnyObjectId[] {mergeTip, toMerge});
+    } catch (LargeObjectException e) {
+      log.warn("Cannot merge due to LargeObjectException: " + toMerge.name());
+      return false;
     } catch (NoMergeBaseException e) {
       return false;
     } catch (IOException e) {
@@ -440,8 +449,7 @@ public class MergeUtil {
       // that on the current merge tip.
       //
       try {
-        final ThreeWayMerger m =
-            newThreeWayMerger(repo, createDryRunInserter(repo));
+        ThreeWayMerger m = newThreeWayMerger(repo, createDryRunInserter(repo));
         m.setBase(toMerge.getParent(0));
         return m.merge(mergeTip, toMerge);
       } catch (IOException e) {
@@ -544,7 +552,7 @@ public class MergeUtil {
       final CodeReviewCommit mergeTip, final ObjectId treeId,
       final CodeReviewCommit n) throws IOException,
       MissingObjectException, IncorrectObjectTypeException {
-    final List<CodeReviewCommit> merged = new ArrayList<CodeReviewCommit>();
+    final List<CodeReviewCommit> merged = new ArrayList<>();
     rw.resetRetain(canMergeFlag);
     rw.markStart(n);
     rw.markUninteresting(mergeTip);

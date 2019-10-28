@@ -32,6 +32,8 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.gerrit.common.data.LabelType;
 import com.google.gerrit.common.data.LabelTypes;
+import com.google.gerrit.common.data.Permission;
+import com.google.gerrit.common.data.PermissionRange;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Change;
 import com.google.gerrit.reviewdb.client.PatchSet;
@@ -43,14 +45,18 @@ import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gerrit.server.notedb.ChangeUpdate;
 import com.google.gerrit.server.notedb.NotesMigration;
 import com.google.gerrit.server.notedb.ReviewerState;
+import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.server.util.TimeUtil;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
+import com.google.inject.Singleton;
 
 import java.sql.Timestamp;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -65,6 +71,7 @@ import java.util.Set;
  * <p>
  * The methods in this class only modify the gwtorm database.
  */
+@Singleton
 public class ApprovalsUtil {
   private static Ordering<PatchSetApproval> SORT_APPROVALS = Ordering.natural()
       .onResultOf(new Function<PatchSetApproval, Timestamp>() {
@@ -90,11 +97,14 @@ public class ApprovalsUtil {
   }
 
   private final NotesMigration migration;
+  private final ApprovalCopier copier;
 
   @VisibleForTesting
   @Inject
-  public ApprovalsUtil(NotesMigration migration) {
+  public ApprovalsUtil(NotesMigration migration,
+      ApprovalCopier copier) {
     this.migration = migration;
+    this.copier = copier;
   }
 
   /**
@@ -211,6 +221,52 @@ public class ApprovalsUtil {
     return Collections.unmodifiableList(cells);
   }
 
+  public void addApprovals(ReviewDb db, ChangeUpdate update, LabelTypes labelTypes,
+      PatchSet ps, PatchSetInfo info, Change change, ChangeControl changeCtl,
+      Map<String, Short> approvals) throws OrmException {
+    if (!approvals.isEmpty()) {
+      checkApprovals(approvals, labelTypes, change, changeCtl);
+      List<PatchSetApproval> cells = new ArrayList<>(approvals.size());
+      Timestamp ts = TimeUtil.nowTs();
+      for (Map.Entry<String, Short> vote : approvals.entrySet()) {
+        LabelType lt = labelTypes.byLabel(vote.getKey());
+        cells.add(new PatchSetApproval(new PatchSetApproval.Key(
+            ps.getId(),
+            info.getCommitter().getAccount(),
+            lt.getLabelId()),
+            vote.getValue(),
+            ts));
+        update.putApproval(vote.getKey(), vote.getValue());
+      }
+      db.patchSetApprovals().insert(cells);
+    }
+  }
+
+  public static void checkLabel(LabelTypes labelTypes, String name, Short value) {
+    LabelType label = labelTypes.byLabel(name);
+    if (label == null) {
+      throw new IllegalArgumentException(String.format(
+          "label \"%s\" is not a configured label", name));
+    }
+    if (label.getValue(value) == null) {
+      throw new IllegalArgumentException(String.format(
+          "label \"%s\": %d is not a valid value", name, value));
+    }
+  }
+
+  private static void checkApprovals(Map<String, Short> approvals, LabelTypes labelTypes,
+      Change change, ChangeControl changeCtl) {
+    for (Map.Entry<String, Short> vote : approvals.entrySet()) {
+      String name = vote.getKey();
+      Short value = vote.getValue();
+      PermissionRange range = changeCtl.getRange(Permission.forLabel(name));
+      if (range == null || !range.contains(value)) {
+        throw new IllegalArgumentException(String.format(
+            "applying label \"%s\": %d is restricted", name, value));
+      }
+    }
+  }
+
   public ListMultimap<PatchSet.Id, PatchSetApproval> byChange(ReviewDb db,
       ChangeNotes notes) throws OrmException {
     if (!migration.readPatchSetApprovals()) {
@@ -225,23 +281,22 @@ public class ApprovalsUtil {
     return notes.load().getApprovals();
   }
 
-  public List<PatchSetApproval> byPatchSet(ReviewDb db, ChangeNotes notes,
+  public Iterable<PatchSetApproval> byPatchSet(ReviewDb db, ChangeControl ctl,
       PatchSet.Id psId) throws OrmException {
     if (!migration.readPatchSetApprovals()) {
       return sortApprovals(db.patchSetApprovals().byPatchSet(psId));
     }
-    return notes.load().getApprovals().get(psId);
+    return copier.getForPatchSet(db, ctl, psId);
   }
 
-  public List<PatchSetApproval> byPatchSetUser(ReviewDb db,
-      ChangeNotes notes, PatchSet.Id psId, Account.Id accountId)
+  public Iterable<PatchSetApproval> byPatchSetUser(ReviewDb db,
+      ChangeControl ctl, PatchSet.Id psId, Account.Id accountId)
       throws OrmException {
     if (!migration.readPatchSetApprovals()) {
       return sortApprovals(
           db.patchSetApprovals().byPatchSetUser(psId, accountId));
     }
-    return ImmutableList.copyOf(
-        filterApprovals(byPatchSet(db, notes, psId), accountId));
+    return filterApprovals(byPatchSet(db, ctl, psId), accountId);
   }
 
   public PatchSetApproval getSubmitter(ReviewDb db, ChangeNotes notes,
@@ -250,7 +305,8 @@ public class ApprovalsUtil {
       return null;
     }
     try {
-      return getSubmitter(c, byPatchSet(db, notes, c));
+      // Submit approval is never copied, so bypass expensive byPatchSet call.
+      return getSubmitter(c, byChange(db, notes).get(c));
     } catch (OrmException e) {
       return null;
     }

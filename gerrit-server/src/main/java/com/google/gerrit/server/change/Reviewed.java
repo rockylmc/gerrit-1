@@ -22,14 +22,16 @@ import com.google.gwtorm.server.OrmDuplicateKeyException;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.util.Collections;
 
-class Reviewed {
-  static class Input {
+public class Reviewed {
+  public static class Input {
   }
 
-  static class PutReviewed implements RestModifyView<FileResource, Input> {
+  @Singleton
+  public static class PutReviewed implements RestModifyView<FileResource, Input> {
     private final Provider<ReviewDb> dbProvider;
 
     @Inject
@@ -57,7 +59,8 @@ class Reviewed {
     }
   }
 
-  static class DeleteReviewed implements RestModifyView<FileResource, Input> {
+  @Singleton
+  public static class DeleteReviewed implements RestModifyView<FileResource, Input> {
     private final Provider<ReviewDb> dbProvider;
 
     @Inject

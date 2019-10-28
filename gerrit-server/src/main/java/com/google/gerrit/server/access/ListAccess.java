@@ -23,6 +23,7 @@ import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRule;
 import com.google.gerrit.common.data.RefConfigSection;
 import com.google.gerrit.common.errors.NoSuchGroupException;
+import com.google.gerrit.extensions.common.ProjectInfo;
 import com.google.gerrit.extensions.restapi.ResourceConflictException;
 import com.google.gerrit.extensions.restapi.ResourceNotFoundException;
 import com.google.gerrit.extensions.restapi.RestReadView;
@@ -41,7 +42,6 @@ import com.google.gerrit.server.project.NoSuchProjectException;
 import com.google.gerrit.server.project.ProjectCache;
 import com.google.gerrit.server.project.ProjectControl;
 import com.google.gerrit.server.project.ProjectJson;
-import com.google.gerrit.server.project.ProjectJson.ProjectInfo;
 import com.google.gerrit.server.project.ProjectState;
 import com.google.gerrit.server.project.RefControl;
 import com.google.inject.Inject;
@@ -157,8 +157,7 @@ public class ListAccess implements RestReadView<TopLevelResource> {
           pc.controlForRef(RefNames.REFS_CONFIG);
       local = Maps.newHashMap();
       ownerOf = Sets.newHashSet();
-      Map<AccountGroup.UUID, Boolean> visibleGroups =
-          new HashMap<AccountGroup.UUID, Boolean>();
+      Map<AccountGroup.UUID, Boolean> visibleGroups = new HashMap<>();
 
       for (AccessSection section : config.getAccessSections()) {
         String name = section.getName();

@@ -35,6 +35,7 @@ import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
 import com.google.gerrit.server.GerritPersonIdent;
 import com.google.gerrit.server.account.AccountCache;
+import com.google.gerrit.server.change.ChangeKindCache;
 import com.google.gerrit.server.config.CanonicalWebUrl;
 import com.google.gerrit.server.data.AccountAttribute;
 import com.google.gerrit.server.data.ApprovalAttribute;
@@ -84,6 +85,7 @@ public class EventFactory {
   private final Provider<ReviewDb> db;
   private final ChangeData.Factory changeDataFactory;
   private final ApprovalsUtil approvalsUtil;
+  private final ChangeKindCache changeKindCache;
 
   @Inject
   EventFactory(AccountCache accountCache,
@@ -93,7 +95,8 @@ public class EventFactory {
       @GerritPersonIdent PersonIdent myIdent,
       Provider<ReviewDb> db,
       ChangeData.Factory changeDataFactory,
-      ApprovalsUtil approvalsUtil) {
+      ApprovalsUtil approvalsUtil,
+      ChangeKindCache changeKindCache) {
     this.accountCache = accountCache;
     this.urlProvider = urlProvider;
     this.patchListCache = patchListCache;
@@ -103,6 +106,7 @@ public class EventFactory {
     this.db = db;
     this.changeDataFactory = changeDataFactory;
     this.approvalsUtil = approvalsUtil;
+    this.changeKindCache = changeKindCache;
   }
 
   /**
@@ -190,7 +194,7 @@ public class EventFactory {
    */
   public void addSubmitRecords(ChangeAttribute ca,
       List<SubmitRecord> submitRecords) {
-    ca.submitRecords = new ArrayList<SubmitRecordAttribute>();
+    ca.submitRecords = new ArrayList<>();
 
     for (SubmitRecord submitRecord : submitRecords) {
       SubmitRecordAttribute sa = new SubmitRecordAttribute();
@@ -209,7 +213,7 @@ public class EventFactory {
   private void addSubmitRecordLabels(SubmitRecord submitRecord,
       SubmitRecordAttribute sa) {
     if (submitRecord.labels != null && !submitRecord.labels.isEmpty()) {
-      sa.labels = new ArrayList<SubmitLabelAttribute>();
+      sa.labels = new ArrayList<>();
       for (SubmitRecord.Label lbl : submitRecord.labels) {
         SubmitLabelAttribute la = new SubmitLabelAttribute();
         la.label = lbl.label;
@@ -224,8 +228,8 @@ public class EventFactory {
   }
 
   public void addDependencies(ChangeAttribute ca, Change change) {
-    ca.dependsOn = new ArrayList<DependencyAttribute>();
-    ca.neededBy = new ArrayList<DependencyAttribute>();
+    ca.dependsOn = new ArrayList<>();
+    ca.neededBy = new ArrayList<>();
     try {
       final ReviewDb db = schema.open();
       try {
@@ -293,7 +297,7 @@ public class EventFactory {
 
   public void addTrackingIds(ChangeAttribute a, Multimap<String, String> set) {
     if (!set.isEmpty()) {
-      a.trackingIds = new ArrayList<TrackingIdAttribute>(set.size());
+      a.trackingIds = new ArrayList<>(set.size());
       for (Map.Entry<String, Collection<String>> e : set.asMap().entrySet()) {
         for (String id : e.getValue()) {
           TrackingIdAttribute t = new TrackingIdAttribute();
@@ -324,7 +328,7 @@ public class EventFactory {
       Map<PatchSet.Id, Collection<PatchSetApproval>> approvals,
       boolean includeFiles, Change change, LabelTypes labelTypes) {
     if (!ps.isEmpty()) {
-      ca.patchSets = new ArrayList<PatchSetAttribute>(ps.size());
+      ca.patchSets = new ArrayList<>(ps.size());
       for (PatchSet p : ps) {
         PatchSetAttribute psa = asPatchSetAttribute(p);
         if (approvals != null) {
@@ -344,8 +348,7 @@ public class EventFactory {
       if (comment.getKey().getParentKey().getParentKey().get()
           == Integer.parseInt(patchSetAttribute.number)) {
         if (patchSetAttribute.comments == null) {
-          patchSetAttribute.comments =
-            new ArrayList<PatchSetCommentAttribute>();
+          patchSetAttribute.comments = new ArrayList<>();
         }
         patchSetAttribute.comments.add(asPatchSetLineAttribute(comment));
       }
@@ -358,7 +361,7 @@ public class EventFactory {
       PatchList patchList = patchListCache.get(change, patchSet);
       for (PatchListEntry patch : patchList.getPatches()) {
         if (patchSetAttribute.files == null) {
-          patchSetAttribute.files = new ArrayList<PatchAttribute>();
+          patchSetAttribute.files = new ArrayList<>();
         }
 
         PatchAttribute p = new PatchAttribute();
@@ -376,7 +379,7 @@ public class EventFactory {
   public void addComments(ChangeAttribute ca,
       Collection<ChangeMessage> messages) {
     if (!messages.isEmpty()) {
-      ca.comments = new ArrayList<MessageAttribute>();
+      ca.comments = new ArrayList<>();
       for (ChangeMessage message : messages) {
         ca.comments.add(asMessageAttribute(message));
       }
@@ -402,7 +405,7 @@ public class EventFactory {
     try {
       final ReviewDb db = schema.open();
       try {
-        p.parents = new ArrayList<String>();
+        p.parents = new ArrayList<>();
         for (PatchSetAncestor a : db.patchSetAncestors().ancestorsOf(
             patchSet.getId())) {
           p.parents.add(a.getAncestorRevision().get());
@@ -427,6 +430,7 @@ public class EventFactory {
             p.sizeInsertions += pe.getInsertions();
           }
         }
+        p.kind = changeKindCache.getChangeKind(db, change, patchSet);
       } finally {
         db.close();
       }
@@ -452,7 +456,7 @@ public class EventFactory {
   public void addApprovals(PatchSetAttribute p,
       Collection<PatchSetApproval> list, LabelTypes labelTypes) {
     if (!list.isEmpty()) {
-      p.approvals = new ArrayList<ApprovalAttribute>(list.size());
+      p.approvals = new ArrayList<>(list.size());
       for (PatchSetApproval a : list) {
         if (a.getValue() != 0) {
           p.approvals.add(asApprovalAttribute(a, labelTypes));

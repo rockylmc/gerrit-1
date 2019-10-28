@@ -29,11 +29,13 @@
 
 package com.google.gerrit.httpd.gitweb;
 
+import com.google.gerrit.common.PageLinks;
 import com.google.gerrit.common.data.GerritConfig;
 import com.google.gerrit.extensions.restapi.Url;
 import com.google.gerrit.httpd.GitWebConfig;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.server.AnonymousUser;
+import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.config.SitePaths;
 import com.google.gerrit.server.git.LocalDiskRepositoryManager;
@@ -78,6 +80,8 @@ class GitWebServlet extends HttpServlet {
   private static final Logger log =
       LoggerFactory.getLogger(GitWebServlet.class);
 
+  private static final String PROJECT_LIST_ACTION = "project_list";
+
   private final Set<String> deniedActions;
   private final int bufferSize = 8192;
   private final File gitwebCgi;
@@ -85,20 +89,23 @@ class GitWebServlet extends HttpServlet {
   private final LocalDiskRepositoryManager repoManager;
   private final ProjectControl.Factory projectControl;
   private final Provider<AnonymousUser> anonymousUserProvider;
+  private final Provider<CurrentUser> userProvider;
   private final EnvList _env;
 
   @Inject
   GitWebServlet(final LocalDiskRepositoryManager repoManager,
       final ProjectControl.Factory projectControl,
       final Provider<AnonymousUser> anonymousUserProvider,
+      final Provider<CurrentUser> userProvider,
       final SitePaths site,
       final GerritConfig gerritConfig, final GitWebConfig gitWebConfig)
       throws IOException {
     this.repoManager = repoManager;
     this.projectControl = projectControl;
     this.anonymousUserProvider = anonymousUserProvider;
+    this.userProvider = userProvider;
     this.gitwebCgi = gitWebConfig.getGitwebCGI();
-    this.deniedActions = new HashSet<String>();
+    this.deniedActions = new HashSet<>();
 
     final String url = gitWebConfig.getUrl();
     if ((url != null) && (!url.equals("gitweb"))) {
@@ -115,7 +122,6 @@ class GitWebServlet extends HttpServlet {
 
     deniedActions.add("forks");
     deniedActions.add("opml");
-    deniedActions.add("project_list");
     deniedActions.add("project_index");
 
     _env = new EnvList();
@@ -354,9 +360,18 @@ class GitWebServlet extends HttpServlet {
     }
 
     final Map<String, String> params = getParameters(req);
-    if (deniedActions.contains(params.get("a"))) {
-      rsp.sendError(HttpServletResponse.SC_FORBIDDEN);
-      return;
+    String a = params.get("a");
+    if (a != null) {
+      if (deniedActions.contains(a)) {
+        rsp.sendError(HttpServletResponse.SC_FORBIDDEN);
+        return;
+      }
+
+      if (a.equals(PROJECT_LIST_ACTION)) {
+        rsp.sendRedirect(req.getContextPath() + "/#" + PageLinks.ADMIN_PROJECTS
+            + "?filter=" + Url.encode(params.get("pf") + "/"));
+        return;
+      }
     }
 
     String name = params.get("p");
@@ -377,7 +392,14 @@ class GitWebServlet extends HttpServlet {
         throw new NoSuchProjectException(nameKey);
       }
     } catch (NoSuchProjectException e) {
-      rsp.sendError(HttpServletResponse.SC_NOT_FOUND);
+      if (userProvider.get().isIdentifiedUser()) {
+        rsp.sendError(HttpServletResponse.SC_NOT_FOUND);
+      } else {
+        // Allow anonymous users a chance to login.
+        // Avoid leaking information by not distinguishing between
+        // project not existing and no access rights.
+        rsp.sendRedirect(getLoginRedirectUrl(req));
+      }
       return;
     }
 
@@ -397,8 +419,23 @@ class GitWebServlet extends HttpServlet {
     }
   }
 
+  private static String getLoginRedirectUrl(HttpServletRequest req) {
+    String contextPath = req.getContextPath();
+    String loginUrl = contextPath + "/login/";
+    String token = req.getRequestURI();
+    if (!contextPath.isEmpty()) {
+      token = token.substring(contextPath.length());
+    }
+
+    String queryString = req.getQueryString();
+    if (queryString != null && !queryString.isEmpty()) {
+      token = token.concat("?" + queryString);
+    }
+    return (loginUrl + Url.encode(token));
+  }
+
   private static Map<String, String> getParameters(HttpServletRequest req) {
-    final Map<String, String> params = new HashMap<String, String>();
+    final Map<String, String> params = new HashMap<>();
     for (final String pair : req.getQueryString().split("[&;]")) {
       final int eq = pair.indexOf('=');
       if (0 < eq) {
@@ -669,11 +706,11 @@ class GitWebServlet extends HttpServlet {
     private Map<String, String> envMap;
 
     EnvList() {
-      envMap = new HashMap<String, String>();
+      envMap = new HashMap<>();
     }
 
     EnvList(final EnvList l) {
-      envMap = new HashMap<String, String>(l.envMap);
+      envMap = new HashMap<>(l.envMap);
     }
 
     /** Set a name/value pair, null values will be treated as an empty String */

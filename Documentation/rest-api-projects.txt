@@ -35,43 +35,127 @@ by project name.
   )]}'
   {
     "external/bison": {
-      "kind": "gerritcodereview#project",
       "id": "external%2Fbison",
       "description": "GNU parser generator"
     },
     "external/gcc": {
-      "kind": "gerritcodereview#project",
-      "id": "external%2Fgcc",
+      "id": "external%2Fgcc"
     },
     "external/openssl": {
-      "kind": "gerritcodereview#project",
       "id": "external%2Fopenssl",
       "description": "encryption\ncrypto routines"
     },
     "test": {
-      "kind": "gerritcodereview#project",
       "id": "test",
       "description": "\u003chtml\u003e is escaped"
     }
   }
 ----
 
-.Get all projects with their description
-****
-get::/projects/?d
-****
+[[project-options]]
+==== Project Options
+
+Branch(b)::
+Limit the results to the projects having the specified branch and
+include the sha1 of the branch in the results.
++
+Get projects that have a 'master' branch:
++
+.Request
+----
+GET /projects/?b=master HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "some-project": {
+      "id": "some-project",
+      "branches": {
+        "master": "c5ed9dfcbf002ca0e432d788dab6ca2387829ca7"
+      }
+    },
+    "some-other-project": {
+      "id": "some-other-project",
+      "branches": {
+        "master": "ef1c270142f9581ecf768f4193fc8f8a81102ec2"
+      }
+    },
+  }
+----
+
+Description(d)::
+Include project description in the results.
++
+Get all the projects with their description:
++
+.Request
+----
+GET /projects/?d HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "some-project": {
+      "id": "some-project",
+      "description": "Description of some project."
+    },
+    "some-other-project": {
+      "id": "some-other-project",
+       "description": "Description of some other project."
+      }
+    },
+  }
+----
+
+Limit(n)::
+Limit the number of projects to be included in the results.
++
+Query the first project in the project list:
++
+.Request
+----
+  GET /projects/?n=1 HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "some-project": {
+      "id": "some-project"
+    }
+  }
+----
+
 
 [[suggest-projects]]
-The `/projects/` URL also accepts a prefix string in the `p` parameter.
-This limits the results to those projects that start with the specified
+Prefix(p)::
+Limit the results to those projects that start with the specified
 prefix.
++
 List all projects that start with `platform/`:
-
++
 .Request
 ----
   GET /projects/?p=platform%2F HTTP/1.0
 ----
-
++
 .Response
 ----
   HTTP/1.1 200 OK
@@ -81,31 +165,157 @@ List all projects that start with `platform/`:
   )]}'
   {
     "platform/drivers": {
-      "kind": "gerritcodereview#project",
-      "id": "platform%2Fdrivers",
+      "id": "platform%2Fdrivers"
     },
     "platform/tools": {
-      "kind": "gerritcodereview#project",
-      "id": "platform%2Ftools",
+      "id": "platform%2Ftools"
     }
   }
 ----
++
 E.g. this feature can be used by suggestion client UI's to limit results.
 
-The `/projects/` URL also accepts a limit integer in the `n` parameter.
-This limits the results to show `n` projects.
-
-Query the first 25 projects in project list.
+Regex(r)::
+Limit the results to those projects that match the specified regex.
++
+Boundary matchers '^' and '$' are implicit. For example: the regex 'test.*' will
+match any projects that start with 'test' and regex '.*test' will match any
+project that end with 'test'.
++
+List all projects that match regex `test.*project`:
++
+.Request
 ----
-  GET /projects/?n=25 HTTP/1.0
+  GET /projects/?r=test.*project HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "test/some-project": {
+      "id": "test%2Fsome-project"
+    },
+    "test/some-other-project": {
+      "id": "test%2Fsome-other-project"
+    }
+  }
+
 ----
 
-The `/projects/` URL also accepts a start integer in the `S` parameter.
-The results will skip `S` projects from project list.
-
-Query 25 projects starting from index 50.
+Skip(S)::
+Skip the given number of projects from the beginning of the list.
++
+Query the second project in the project list:
++
+.Request
 ----
-  GET /projects/?n=25&S=50 HTTP/1.0
+  GET /projects/?n=1&S=1 HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "some-other-project": {
+      "id": "some-other-project"
+    }
+  }
+----
+
+Substring(m)::
+Limit the results to those projects that match the specified substring.
++
+List all projects that match substring `test/`:
++
+.Request
+----
+  GET /projects/?m=test%2F HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "test/some-project": {
+      "id": "test%2Fsome-project"
+    },
+    "some-path/test/some-other-project": {
+      "id": "some-path%2Ftest%2Fsome-other-project"
+    }
+  }
+----
+
+Tree(t)::
+Get projects inheritance in a tree-like format. This option does
+not work together with the branch option.
++
+Get all the projects with tree option:
++
+.Request
+----
+GET /projects/?t HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "All-Projects" {
+      "id": "All-Projects"
+    },
+    "child-project": {
+      "id": "child-project",
+      "parent":"parent-project"
+    },
+    "parent-project": {
+      "id": "parent-project",
+      "parent":"All-Projects"
+    }
+  }
+----
+
+Type(type)::
+Get projects with specified type: ALL, CODE, PERMISSIONS.
++
+Get all the projects of type 'PERMISSIONS':
++
+.Request
+----
+GET /projects/?type=PERMISSIONS HTTP/1.0
+----
++
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "All-Projects" {
+      "id": "All-Projects"
+    },
+    "some-parent-project": {
+      "id": "some-parent-project"
+    }
+  }
 ----
 
 [[get-project]]
@@ -132,11 +342,11 @@ describes the project.
 
   )]}'
   {
-    "kind": "gerritcodereview#project",
     "id": "plugins%2Freplication",
     "name": "plugins/replication",
     "parent": "Public-Plugins",
-    "description": "Copies to other servers using the Git protocol"
+    "description": "Copies to other servers using the Git protocol",
+    "state": "ACTIVE"
   }
 ----
 
@@ -176,7 +386,6 @@ describes the created project.
 
   )]}'
   {
-    "kind": "gerritcodereview#project",
     "id": "MyProject",
     "name": "MyProject",
     "parent": "All-Projects",
@@ -446,7 +655,6 @@ read access to `refs/meta/config`.
 
   )]}'
   {
-    "kind": "gerritcodereview#project_config",
     "description": "demo project",
     "use_contributor_agreements": {
       "value": true,
@@ -535,7 +743,6 @@ ConfigInfo] entity.
 
   )]}'
   {
-    "kind": "gerritcodereview#project_config",
     "use_contributor_agreements": {
       "value": false,
       "configured_value": "FALSE",
@@ -612,6 +819,57 @@ The response is the streamed output of the garbage collection.
   Prune loose objects also found in pack files: 100% (36/36)
   Prune loose, unreferenced objects: 100% (36/36)
   done.
+----
+
+[[ban-commit]]
+=== Ban Commit
+--
+'PUT /projects/link:#project-name[\{project-name\}]/ban'
+--
+
+Marks commits as banned for the project. If a commit is banned Gerrit
+rejects every push that includes this commit with
+link:error-contains-banned-commit.html[contains banned commit ...].
+
+[NOTE]
+This REST endpoint only marks the commits as banned, but it does not
+remove the commits from the history of any central branch. This needs
+to be done manually.
+
+The commits to be banned must be specified in the request body as a
+link:#ban-input[BanInput] entity.
+
+The caller must be project owner.
+
+.Request
+----
+  PUT /projects/plugins%2Freplication/ban HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  {
+    "commits": [
+      "a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96",
+      "cf5b56541f84b8b57e16810b18daca9c3adc377b"
+    ],
+    "reason": "Violates IP"
+  }
+----
+
+As response a link:#ban-result-info[BanResultInfo] entity is returned.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "newly_banned": [
+      "a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96",
+      "cf5b56541f84b8b57e16810b18daca9c3adc377b"
+    ]
+  }
 ----
 
 [[branch-endpoints]]
@@ -770,6 +1028,85 @@ The content is returned as base64 encoded string.
   Ly8gQ29weXJpZ2h0IChDKSAyMDEwIFRoZSBBbmRyb2lkIE9wZW4gU291cmNlIFByb2plY...
 ----
 
+[[get-reflog]]
+=== Get Reflog
+--
+'GET /projects/link:#project-name[\{project-name\}]/branches/link:#branch-id[\{branch-id\}]/reflog'
+--
+
+Gets the reflog of a certain branch.
+
+The caller must be project owner.
+
+.Request
+----
+  GET /projects/gerrit/branches/master/reflog HTTP/1.0
+----
+
+As response a list of link:#reflog-entry-info[ReflogEntryInfo] entities
+is returned that describe the reflog entries. The reflog entries are
+returned in reverse order.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  [
+    {
+      "old_id": "976ced8f4fc0909d7e1584d18455299545881d60",
+      "new_id": "2eaa94bac536654eb592c941e33b91f925698d16",
+      "who": {
+        "name": "Jane Roe",
+        "email": "jane.roe@example.com",
+        "date": "2014-06-30 11:53:43.000000000",
+        "tz": 120
+      },
+      "comment": "merged: fast forward"
+    },
+    {
+      "old_id": "c271c6a7161b74f85560c5899c8c73ee89ca5e29",
+      "new_id": "976ced8f4fc0909d7e1584d18455299545881d60",
+      "who": {
+        "name": "John Doe",
+        "email": "john.doe@example.com",
+        "date": "2013-10-02 10:45:26.000000000",
+        "tz": 120
+      },
+      "comment": "merged: fast forward"
+    },
+    {
+      "old_id": "0000000000000000000000000000000000000000",
+      "new_id": "c271c6a7161b74f85560c5899c8c73ee89ca5e29",
+      "who": {
+        "name": "John Doe",
+        "email": "john.doe@example.com",
+        "date": "2013-09-30 19:08:44.000000000",
+        "tz": 120
+      },
+      "comment": ""
+    }
+  ]
+----
+
+The get reflog endpoint also accepts a limit integer in the `n`
+parameter. This limits the results to show the last `n` reflog entries.
+
+Query the last 25 reflog entries.
+----
+  GET /projects/gerrit/branches/master/reflog?n=25 HTTP/1.0
+----
+
+The reflog can also be filtered by timestamp by specifying the `from`
+and `to` parameters. The timestamp for `from` and `to` must be given as
+UTC in the following format: `yyyyMMdd_HHmm`.
+
+----
+  GET /projects/gerrit/branches/master/reflog?from=20130101_0000&to=20140101_0000=25 HTTP/1.0
+----
+
 [[child-project-endpoints]]
 == Child Project Endpoints
 
@@ -798,21 +1135,18 @@ returned that describe the child projects.
   )]}'
   [
     {
-      "kind": "gerritcodereview#project",
       "id": "plugins%2Freplication",
       "name": "plugins/replication",
       "parent": "Public-Plugins",
       "description": "Copies to other servers using the Git protocol"
     },
     {
-      "kind": "gerritcodereview#project",
       "id": "plugins%2Freviewnotes",
       "name": "plugins/reviewnotes",
       "parent": "Public-Plugins",
       "description": "Annotates merged commits using notes on refs/notes/review."
     },
     {
-      "kind": "gerritcodereview#project",
       "id": "plugins%2Fsingleusergroup",
       "name": "plugins/singleusergroup",
       "parent": "Public-Plugins",
@@ -841,35 +1175,30 @@ are not resolved further.
   )]}'
   [
     {
-      "kind": "gerritcodereview#project",
       "id": "gerrit",
       "name": "gerrit",
       "parent": "Public-Projects",
       "description": "Gerrit Code Review"
     },
     {
-      "kind": "gerritcodereview#project",
       "id": "plugins%2Freplication",
       "name": "plugins/replication",
       "parent": "Public-Plugins",
       "description": "Copies to other servers using the Git protocol"
     },
     {
-      "kind": "gerritcodereview#project",
       "id": "plugins%2Freviewnotes",
       "name": "plugins/reviewnotes",
       "parent": "Public-Plugins",
       "description": "Annotates merged commits using notes on refs/notes/review."
     },
     {
-      "kind": "gerritcodereview#project",
       "id": "plugins%2Fsingleusergroup",
       "name": "plugins/singleusergroup",
       "parent": "Public-Plugins",
       "description": "GroupBackend enabling users to be directly added to access rules"
     },
     {
-      "kind": "gerritcodereview#project",
       "id": "Public-Plugins",
       "name": "Public-Plugins",
       "parent": "Public-Projects",
@@ -903,12 +1232,88 @@ describes the child project.
 
   )]}'
   {
-    "kind": "gerritcodereview#project",
     "id": "plugins%2Freplication",
     "name": "plugins/replication",
     "parent": "Public-Plugins",
     "description": "Copies to other servers using the Git protocol"
   }
+----
+
+[[commit-endpoints]]
+== Commit Endpoints
+
+[[get-commit]]
+=== Get Commit
+--
+'GET /projects/link:#project-name[\{project-name\}]/commits/link:#commit-id[\{commit-id\}]'
+--
+
+Retrieves a commit of a project.
+
+The commit must be visible to the caller.
+
+.Request
+----
+  GET /projects/work%2Fmy-project/commits/a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96 HTTP/1.0
+----
+
+As response a link:rest-api-changes.html#commit-info[CommitInfo] entity
+is returned that describes the commit.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "commit": "184ebe53805e102605d11f6b143486d15c23a09c",
+    "parents": [
+      {
+        "commit": "1eee2c9d8f352483781e772f35dc586a69ff5646",
+        "subject": "Migrate contributor agreements to All-Projects."
+      }
+    ],
+    "author": {
+      "name": "Shawn O. Pearce",
+      "email": "sop@google.com",
+      "date": "2012-04-24 18:08:08.000000000",
+      "tz": -420
+    },
+    "committer": {
+      "name": "Shawn O. Pearce",
+      "email": "sop@google.com",
+      "date": "2012-04-24 18:08:08.000000000",
+      "tz": -420
+    },
+    "subject": "Use an EventBus to manage star icons",
+    "message": "Use an EventBus to manage star icons\n\nImage widgets that need to ..."
+  }
+----
+
+[[get-content]]
+=== Get Content
+--
+'GET /projects/link:#project-name[\{project-name\}]/commits/link:#commit-id[\{commit-id\}]/files/link:rest-api-changes.html#file-id[\{file-id\}]/content'
+--
+
+Gets the content of a file from a certain commit.
+
+.Request
+----
+  GET /projects/work%2Fmy-project/commits/a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96/files/gerrit-server%2Fsrc%2Fmain%2Fjava%2Fcom%2Fgoogle%2Fgerrit%2Fserver%2Fproject%2FRefControl.java/content HTTP/1.0
+----
+
+The content is returned as base64 encoded string.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: text/plain;charset=UTF-8
+
+  Ly8gQ29weXJpZ2h0IChDKSAyMDEwIFRoZSBBbmRyb2lkIE9wZW4gU291cmNlIFByb2plY...
 ----
 
 [[dashboard-endpoints]]
@@ -941,7 +1346,6 @@ List all dashboards for the `work/my-project` project:
   )]}'
   [
     {
-      "kind": "gerritcodereview#dashboard",
       "id": "main:closed",
       "ref": "main",
       "path": "closed",
@@ -993,7 +1397,6 @@ that describes the dashboard.
 
   )]}'
   {
-    "kind": "gerritcodereview#dashboard",
     "id": "main:closed",
     "ref": "main",
     "path": "closed",
@@ -1030,7 +1433,6 @@ dashboard-id.
 
   )]}'
   {
-    "kind": "gerritcodereview#dashboard",
     "id": "main:closed",
     "ref": "main",
     "path": "closed",
@@ -1086,7 +1488,6 @@ link:#dashboard-info[DashboardInfo] entity.
 
   )]}'
   {
-    "kind": "gerritcodereview#dashboard",
     "id": "main:closed",
     "ref": "main",
     "path": "closed",
@@ -1142,6 +1543,10 @@ requests.
 The name of a branch or `HEAD`. The prefix `refs/heads/` can be
 omitted.
 
+[[commit-id]]
+=== \{commit-id\}
+Commit ID.
+
 [[dashboard-id]]
 === \{dashboard-id\}
 The ID of a dashboard in the format '<ref>:<path>'.
@@ -1169,6 +1574,30 @@ The `BranchInfo` entity contains information about a branch.
 |`can_delete`|`false` if not set|
 Whether the calling user can delete this branch.
 |=========================
+
+[[ban-input]]
+=== BanInput
+The `BanInput` entity contains information for banning commits in a
+project.
+
+[options="header",width="50%",cols="1,^2,4"]
+|=======================
+|Field Name||Description
+|`commits` ||List of commits to be banned.
+|`reason`  |optional|Reason for banning the commits.
+|=======================
+
+[[ban-result-info]]
+=== BanResultInfo
+The `BanResultInfo` entity describes the result of banning commits.
+
+[options="header",width="50%",cols="1,^2,4"]
+|=============================
+|Field Name      ||Description
+|`newly_banned`  |optional|List of newly banned commits.
+|`already_banned`|optional|List of commits that were already banned.
+|`ignored`       |optional|List of object IDs that were ignored.
+|=============================
 
 [[branch-input]]
 === BranchInput
@@ -1347,7 +1776,6 @@ dashboard.
 [options="header",width="50%",cols="1,^2,4"]
 |===============================
 |Field Name        ||Description
-|`kind`            ||`gerritcodereview#dashboard`
 |`id`              ||
 The ID of the dashboard. The ID has the format '<ref>:<path>',
 where ref and path are URL encoded.
@@ -1490,7 +1918,6 @@ The `ProjectInfo` entity contains information about a project.
 [options="header",width="50%",cols="1,^2,4"]
 |===========================
 |Field Name    ||Description
-|`kind`        ||`gerritcodereview#project`
 |`id`          ||The URL encoded project name.
 |`name`        |
 not set if returned in a map where the project name is used as map key|
@@ -1500,7 +1927,11 @@ The name of the parent project. +
 `?-<n>` if the parent project is not visible (`<n>` is a number which
 is increased for each non-visible project).
 |`description` |optional|The description of the project.
+|`state`       |optional|`ACTIVE`, `READ_ONLY` or `HIDDEN`.
 |`branches`    |optional|Map of branch names to HEAD revisions.
+|'web_links'   |optional|
+Links to the project in external sites as a list of
+link:rest-api-changes.html#web-link-info[WebLinkInfo] entries.
 |===========================
 
 [[project-input]]
@@ -1573,6 +2004,21 @@ project parent.
 Message that should be used to commit the change of the project parent
 in the `project.config` file to the `refs/meta/config` branch.
 |=============================
+
+[[reflog-entry-info]]
+=== ReflogEntryInfo
+The `ReflogEntryInfo` entity describes an entry in a reflog.
+
+[options="header",width="50%",cols="1,6"]
+|============================
+|Field Name      |Description
+|`old_id`        |The old commit ID.
+|`new_id`        |The new commit ID.
+|`who`           |
+The user performing the change as a
+link:rest-api-changes.html#git-person-info[GitPersonInfo] entity.
+|`comment`       |Comment of the reflog entry.
+|============================
 
 [[repository-statistics-info]]
 === RepositoryStatisticsInfo

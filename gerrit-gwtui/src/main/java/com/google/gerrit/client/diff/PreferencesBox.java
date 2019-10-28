@@ -31,7 +31,10 @@ import com.google.gerrit.client.ui.NpIntTextBox;
 import com.google.gerrit.reviewdb.client.AccountDiffPreference;
 import com.google.gerrit.reviewdb.client.AccountDiffPreference.Theme;
 import com.google.gerrit.reviewdb.client.AccountDiffPreference.Whitespace;
+import com.google.gerrit.reviewdb.client.Patch.ChangeType;
 import com.google.gwt.core.client.GWT;
+import com.google.gwt.core.client.Scheduler;
+import com.google.gwt.core.client.Scheduler.RepeatingCommand;
 import com.google.gwt.event.dom.client.ChangeEvent;
 import com.google.gwt.event.dom.client.ClickEvent;
 import com.google.gwt.event.dom.client.KeyDownEvent;
@@ -51,6 +54,12 @@ import com.google.gwt.user.client.ui.HTMLPanel;
 import com.google.gwt.user.client.ui.ListBox;
 import com.google.gwt.user.client.ui.PopupPanel;
 import com.google.gwt.user.client.ui.ToggleButton;
+
+import net.codemirror.lib.ModeInjector;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TreeMap;
 
 /** Displays current diff preferences. */
 class PreferencesBox extends Composite {
@@ -78,11 +87,14 @@ class PreferencesBox extends Composite {
   @UiField ToggleButton whitespaceErrors;
   @UiField ToggleButton showTabs;
   @UiField ToggleButton lineNumbers;
+  @UiField ToggleButton leftSide;
+  @UiField ToggleButton emptyPane;
   @UiField ToggleButton topMenu;
   @UiField ToggleButton manualReview;
   @UiField ToggleButton expandAllComments;
   @UiField ToggleButton renderEntireFile;
   @UiField ListBox theme;
+  @UiField ListBox mode;
   @UiField Button apply;
   @UiField Button save;
 
@@ -92,6 +104,7 @@ class PreferencesBox extends Composite {
     initWidget(uiBinder.createAndBindUi(this));
     initIgnoreWhitespace();
     initTheme();
+    initMode();
   }
 
   @Override
@@ -114,6 +127,16 @@ class PreferencesBox extends Composite {
         if (prefs.context() == WHOLE_FILE_CONTEXT) {
           contextEntireFile.setValue(true);
         }
+        if (view.canEnableRenderEntireFile(prefs)) {
+          renderEntireFile.setEnabled(true);
+        } else {
+          if (prefs.renderEntireFile()) {
+            prefs.renderEntireFile(false);
+            renderEntireFile.setValue(false);
+            view.updateRenderEntireFile();
+          }
+          renderEntireFile.setEnabled(false);
+        }
         view.setContext(prefs.context());
       }
     };
@@ -129,11 +152,21 @@ class PreferencesBox extends Composite {
     whitespaceErrors.setValue(prefs.showWhitespaceErrors());
     showTabs.setValue(prefs.showTabs());
     lineNumbers.setValue(prefs.showLineNumbers());
+    leftSide.setValue(view.diffTable.isVisibleA());
+    emptyPane.setValue(!prefs.hideEmptyPane());
+    leftSide.setEnabled(!(prefs.hideEmptyPane()
+        && view.diffTable.getChangeType() == ChangeType.ADDED));
     topMenu.setValue(!prefs.hideTopMenu());
     manualReview.setValue(prefs.manualReview());
     expandAllComments.setValue(prefs.expandAllComments());
     renderEntireFile.setValue(prefs.renderEntireFile());
+    renderEntireFile.setEnabled(view.canEnableRenderEntireFile(prefs));
     setTheme(prefs.theme());
+
+    mode.setEnabled(prefs.syntaxHighlighting());
+    if (prefs.syntaxHighlighting()) {
+      setMode(view.getCmFromSide(DisplaySide.B).getStringOption("mode"));
+    }
 
     switch (view.getIntraLineStatus()) {
       case OFF:
@@ -262,6 +295,26 @@ class PreferencesBox extends Composite {
     view.setShowLineNumbers(prefs.showLineNumbers());
   }
 
+  @UiHandler("leftSide")
+  void onLeftSide(ValueChangeEvent<Boolean> e) {
+    view.diffTable.setVisibleA(e.getValue());
+  }
+
+  @UiHandler("emptyPane")
+  void onHideEmptyPane(ValueChangeEvent<Boolean> e) {
+    prefs.hideEmptyPane(!e.getValue());
+    view.diffTable.setHideEmptyPane(prefs.hideEmptyPane());
+    if (prefs.hideEmptyPane()) {
+      if (view.diffTable.getChangeType() == ChangeType.ADDED) {
+        leftSide.setValue(false);
+        leftSide.setEnabled(false);
+      }
+    } else {
+      leftSide.setValue(view.diffTable.isVisibleA());
+      leftSide.setEnabled(true);
+    }
+  }
+
   @UiHandler("topMenu")
   void onTopMenu(ValueChangeEvent<Boolean> e) {
     prefs.hideTopMenu(!e.getValue());
@@ -277,7 +330,34 @@ class PreferencesBox extends Composite {
   @UiHandler("syntaxHighlighting")
   void onSyntaxHighlighting(ValueChangeEvent<Boolean> e) {
     prefs.syntaxHighlighting(e.getValue());
+    mode.setEnabled(prefs.syntaxHighlighting());
+    if (prefs.syntaxHighlighting()) {
+      setMode(view.getContentType());
+    }
     view.setSyntaxHighlighting(prefs.syntaxHighlighting());
+  }
+
+  @UiHandler("mode")
+  void onMode(ChangeEvent e) {
+    final String m = mode.getValue(mode.getSelectedIndex());
+    prefs.syntaxHighlighting(true);
+    syntaxHighlighting.setValue(true, false);
+    Scheduler.get().scheduleFixedDelay(new RepeatingCommand() {
+      @Override
+      public boolean execute() {
+        if (prefs.syntaxHighlighting() && view.isAttached()) {
+          view.operation(new Runnable() {
+            @Override
+            public void run() {
+              String mode = m != null && !m.isEmpty() ? m : null;
+              view.getCmFromSide(DisplaySide.A).setOption("mode", mode);
+              view.getCmFromSide(DisplaySide.B).setOption("mode", mode);
+            }
+          });
+        }
+        return false;
+      }
+    }, 50);
   }
 
   @UiHandler("whitespaceErrors")
@@ -372,6 +452,52 @@ class PreferencesBox extends Composite {
     ignoreWhitespace.addItem(
         PatchUtil.C.whitespaceIGNORE_ALL_SPACE(),
         IGNORE_ALL_SPACE.name());
+  }
+
+  private static final Map<String, String> NAME_TO_MODE;
+  private static final Map<String, String> NORMALIZED_MODES;
+  static {
+    NAME_TO_MODE = new TreeMap<>();
+    NORMALIZED_MODES = new HashMap<>();
+    for (String type : ModeInjector.getKnownMimeTypes()) {
+      String name = type;
+      if (name.startsWith("text/x-")) {
+        name = name.substring("text/x-".length());
+      } else if (name.startsWith("text/")) {
+        name = name.substring("text/".length());
+      } else if (name.startsWith("application/")) {
+        name = name.substring("application/".length());
+      }
+
+      String normalized = NAME_TO_MODE.get(name);
+      if (normalized == null) {
+        normalized = type;
+        NAME_TO_MODE.put(name, normalized);
+      }
+      NORMALIZED_MODES.put(type, normalized);
+    }
+  }
+
+  private void initMode() {
+    mode.addItem("", "");
+    for (Map.Entry<String, String> e : NAME_TO_MODE.entrySet()) {
+      mode.addItem(e.getKey(), e.getValue());
+    }
+  }
+
+  private void setMode(String modeType) {
+    if (modeType != null && !modeType.isEmpty()) {
+      if (NORMALIZED_MODES.containsKey(modeType)) {
+        modeType = NORMALIZED_MODES.get(modeType);
+      }
+      for (int i = 0; i < mode.getItemCount(); i++) {
+        if (mode.getValue(i).equals(modeType)) {
+          mode.setSelectedIndex(i);
+          return;
+        }
+      }
+    }
+    mode.setSelectedIndex(0);
   }
 
   private void setTheme(Theme v) {

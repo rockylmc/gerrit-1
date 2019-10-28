@@ -85,7 +85,9 @@ public interface GerritCss extends CssResource {
   String createGroupLink();
   String createProjectPanel();
   String dataCell();
+  String dataCellHidden();
   String dataHeader();
+  String dataHeaderHidden();
   String diffLinkCell();
   String diffText();
   String diffTextCONTEXT();
@@ -232,6 +234,7 @@ public interface GerritCss extends CssResource {
   String sshHostKeyPanelKnownHostEntry();
   String sshKeyPanelEncodedKey();
   String sshKeyPanelInvalid();
+  String stringListPanelButtons();
   String topMostCell();
   String topmenu();
   String topmenuMenuLeft();

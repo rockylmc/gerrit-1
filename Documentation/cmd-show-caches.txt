@@ -22,14 +22,23 @@ Display statistics about the size and hit ratio of in-memory caches.
 	operating system, and other details about the environment
 	that Gerrit Code Review is running in.
 
+--show-threads::
+	Show detailed counts for Gerrit specific threads.
+
 --width::
 -w::
 	Width of the output table.
 
 == ACCESS
-Caller must be a member of the privileged 'Administrators' group,
-or have been granted
-link:access-control.html#capability_viewCaches[the 'View Caches' global capability].
+The caller must be a member of a group that is granted the
+link:access-control.html#capability_viewCaches[View Caches] capability
+or the link:access-control.html#capability_administrateServer[
+Administrate Server] capability.
+
+The summary information about SSH, threads, tasks, memory and JVM are
+only printed out if the caller is a member of a group that is granted
+the link:access-control.html#capability_administrateServer[Administrate
+Server] capability.
 
 == SCRIPTING
 Intended for interactive use only.
@@ -72,7 +81,9 @@ Intended for interactive use only.
   Tasks:   10  total =    6 running +      0 ready +    4 sleeping
   Mem:  14.94g total =   3.04g used +  11.89g free +  10.00m buffers
         28.44g max
-           107 open files,        4 cpus available,      371 threads
+           107 open files
+
+  Threads: 4 CPUs available, 371 threads
 ====
 
 == SEE ALSO

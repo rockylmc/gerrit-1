@@ -28,9 +28,11 @@ import com.google.gerrit.server.account.AccountsCollection;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.util.Collection;
 
+@Singleton
 public class Reviewers implements
     ChildCollection<ChangeResource, ReviewerResource> {
   private final DynamicMap<RestView<ReviewerResource>> views;
@@ -38,7 +40,7 @@ public class Reviewers implements
   private final ApprovalsUtil approvalsUtil;
   private final AccountsCollection accounts;
   private final ReviewerResource.Factory resourceFactory;
-  private final Provider<ListReviewers> list;
+  private final ListReviewers list;
 
   @Inject
   Reviewers(Provider<ReviewDb> dbProvider,
@@ -46,7 +48,7 @@ public class Reviewers implements
       AccountsCollection accounts,
       ReviewerResource.Factory resourceFactory,
       DynamicMap<RestView<ReviewerResource>> views,
-      Provider<ListReviewers> list) {
+      ListReviewers list) {
     this.dbProvider = dbProvider;
     this.approvalsUtil = approvalsUtil;
     this.accounts = accounts;
@@ -62,7 +64,7 @@ public class Reviewers implements
 
   @Override
   public RestView<ChangeResource> list() {
-    return list.get();
+    return list;
   }
 
   @Override

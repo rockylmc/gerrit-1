@@ -39,12 +39,13 @@ import com.google.gerrit.common.data.Permission;
 import com.google.gerrit.common.data.PermissionRule;
 import com.google.gerrit.common.data.PermissionRule.Action;
 import com.google.gerrit.common.data.RefConfigSection;
+import com.google.gerrit.extensions.api.projects.ProjectState;
+import com.google.gerrit.extensions.common.InheritableBoolean;
+import com.google.gerrit.extensions.common.SubmitType;
 import com.google.gerrit.reviewdb.client.AccountGroup;
-import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.reviewdb.client.AccountProjectWatch.NotifyType;
 import com.google.gerrit.reviewdb.client.Project;
-import com.google.gerrit.reviewdb.client.Project.State;
-import com.google.gerrit.reviewdb.client.Project.SubmitType;
+import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.server.account.GroupBackend;
 import com.google.gerrit.server.config.ConfigUtil;
 import com.google.gerrit.server.config.PluginConfig;
@@ -94,6 +95,9 @@ public class ProjectConfig extends VersionedMetaData {
   private static final String ACCOUNTS = "accounts";
   private static final String KEY_SAME_GROUP_VISIBILITY = "sameGroupVisibility";
 
+  private static final String BRANCH_ORDER = "branchOrder";
+  private static final String BRANCH = "branch";
+
   private static final String CONTRIBUTOR_AGREEMENT = "contributor-agreement";
   private static final String KEY_ACCEPTED = "accepted";
   private static final String KEY_REQUIRE_CONTACT_INFORMATION = "requireContactInformation";
@@ -126,8 +130,8 @@ public class ProjectConfig extends VersionedMetaData {
   private static final String KEY_LOCAL_DEFAULT = "local-default";
 
   private static final String LABEL = "label";
-  private static final String KEY_ABBREVIATION = "abbreviation";
   private static final String KEY_FUNCTION = "function";
+  private static final String KEY_DEFAULT_VALUE = "defaultValue";
   private static final String KEY_COPY_MIN_SCORE = "copyMinScore";
   private static final String KEY_COPY_MAX_SCORE = "copyMaxScore";
   private static final String KEY_COPY_ALL_SCORES_ON_TRIVIAL_REBASE = "copyAllScoresOnTrivialRebase";
@@ -142,17 +146,19 @@ public class ProjectConfig extends VersionedMetaData {
 
   private static final SubmitType defaultSubmitAction =
       SubmitType.MERGE_IF_NECESSARY;
-  private static final State defaultStateValue =
-      State.ACTIVE;
+  private static final ProjectState defaultStateValue =
+      ProjectState.ACTIVE;
 
   private Project.NameKey projectName;
   private Project project;
   private AccountsSection accountsSection;
   private Map<AccountGroup.UUID, GroupReference> groupsByUUID;
   private Map<String, AccessSection> accessSections;
+  private BranchOrderSection branchOrderSection;
   private Map<String, ContributorAgreement> contributorAgreements;
   private Map<String, NotifyConfig> notifySections;
   private Map<String, LabelType> labelSections;
+  private ConfiguredMimeTypes mimeTypes;
   private List<CommentLinkInfo> commentLinkSections;
   private List<ValidationError> validationErrors;
   private ObjectId rulesId;
@@ -239,6 +245,10 @@ public class ProjectConfig extends VersionedMetaData {
     return sort(accessSections.values());
   }
 
+  public BranchOrderSection getBranchOrderSection() {
+    return branchOrderSection;
+  }
+
   public void remove(AccessSection section) {
     if (section != null) {
       accessSections.remove(section.getName());
@@ -297,6 +307,10 @@ public class ProjectConfig extends VersionedMetaData {
 
   public Collection<CommentLinkInfo> getCommentLinkSections() {
     return commentLinkSections;
+  }
+
+  public ConfiguredMimeTypes getMimeTypes() {
+    return mimeTypes;
   }
 
   public GroupReference resolve(AccountGroup group) {
@@ -398,13 +412,13 @@ public class ProjectConfig extends VersionedMetaData {
     }
     p.setParentName(rc.getString(ACCESS, null, KEY_INHERIT_FROM));
 
-    p.setUseContributorAgreements(getEnum(rc, RECEIVE, null, KEY_REQUIRE_CONTRIBUTOR_AGREEMENT, Project.InheritableBoolean.INHERIT));
-    p.setUseSignedOffBy(getEnum(rc, RECEIVE, null, KEY_REQUIRE_SIGNED_OFF_BY, Project.InheritableBoolean.INHERIT));
-    p.setRequireChangeID(getEnum(rc, RECEIVE, null, KEY_REQUIRE_CHANGE_ID, Project.InheritableBoolean.INHERIT));
+    p.setUseContributorAgreements(getEnum(rc, RECEIVE, null, KEY_REQUIRE_CONTRIBUTOR_AGREEMENT, InheritableBoolean.INHERIT));
+    p.setUseSignedOffBy(getEnum(rc, RECEIVE, null, KEY_REQUIRE_SIGNED_OFF_BY, InheritableBoolean.INHERIT));
+    p.setRequireChangeID(getEnum(rc, RECEIVE, null, KEY_REQUIRE_CHANGE_ID, InheritableBoolean.INHERIT));
     p.setMaxObjectSizeLimit(rc.getString(RECEIVE, null, KEY_MAX_OBJECT_SIZE_LIMIT));
 
     p.setSubmitType(getEnum(rc, SUBMIT, null, KEY_ACTION, defaultSubmitAction));
-    p.setUseContentMerge(getEnum(rc, SUBMIT, null, KEY_MERGE_CONTENT, Project.InheritableBoolean.INHERIT));
+    p.setUseContentMerge(getEnum(rc, SUBMIT, null, KEY_MERGE_CONTENT, InheritableBoolean.INHERIT));
     p.setState(getEnum(rc, PROJECT, null, KEY_STATE, defaultStateValue));
 
     p.setDefaultDashboard(rc.getString(DASHBOARD, null, KEY_DEFAULT));
@@ -413,9 +427,11 @@ public class ProjectConfig extends VersionedMetaData {
     loadAccountsSection(rc, groupsByName);
     loadContributorAgreements(rc, groupsByName);
     loadAccessSections(rc, groupsByName);
+    loadBranchOrderSection(rc);
     loadNotifySections(rc, groupsByName);
     loadLabelSections(rc);
     loadCommentLinkSections(rc);
+    mimeTypes = new ConfiguredMimeTypes(projectName.get(), rc);
     loadPluginSections(rc);
     loadReceiveSection(rc);
   }
@@ -429,7 +445,7 @@ public class ProjectConfig extends VersionedMetaData {
 
   private void loadContributorAgreements(
       Config rc, Map<String, GroupReference> groupsByName) {
-    contributorAgreements = new HashMap<String, ContributorAgreement>();
+    contributorAgreements = new HashMap<>();
     for (String name : rc.getSubsections(CONTRIBUTOR_AGREEMENT)) {
       ContributorAgreement ca = getContributorAgreement(name, true);
       ca.setDescription(rc.getString(CONTRIBUTOR_AGREEMENT, name, KEY_DESCRIPTION));
@@ -527,7 +543,7 @@ public class ProjectConfig extends VersionedMetaData {
 
   private void loadAccessSections(
       Config rc, Map<String, GroupReference> groupsByName) {
-    accessSections = new HashMap<String, AccessSection>();
+    accessSections = new HashMap<>();
     for (String refName : rc.getSubsections(ACCESS)) {
       if (RefConfigSection.isValid(refName)) {
         AccessSection as = getAccessSection(refName, true);
@@ -559,6 +575,13 @@ public class ProjectConfig extends VersionedMetaData {
       Permission perm = capability.getPermission(varName, true);
       loadPermissionRules(rc, CAPABILITY, null, varName, groupsByName, perm,
           GlobalCapability.hasRange(varName));
+    }
+  }
+
+  private void loadBranchOrderSection(Config rc) {
+    if (rc.getSections().contains(BRANCH_ORDER)) {
+      branchOrderSection = new BranchOrderSection(
+          rc.getStringList(BRANCH_ORDER, null, BRANCH));
     }
   }
 
@@ -649,10 +672,6 @@ public class ProjectConfig extends VersionedMetaData {
             "Invalid label \"%s\"", name)));
         continue;
       }
-      String abbr = rc.getString(LABEL, name, KEY_ABBREVIATION);
-      if (abbr != null) {
-        label.setAbbreviation(abbr);
-      }
 
       String functionName = Objects.firstNonNull(
           rc.getString(LABEL, name, KEY_FUNCTION), "MaxWithBlock");
@@ -663,6 +682,17 @@ public class ProjectConfig extends VersionedMetaData {
             "Invalid %s for label \"%s\". Valid names are: %s",
             KEY_FUNCTION, name, Joiner.on(", ").join(LABEL_FUNCTIONS))));
         label.setFunctionName(null);
+      }
+
+      if (!values.isEmpty()) {
+        short dv = (short) rc.getInt(LABEL, name, KEY_DEFAULT_VALUE, 0);
+        if (isInRange(dv, values)) {
+          label.setDefaultValue(dv);
+        } else {
+          error(new ValidationError(PROJECT_CONFIG, String.format(
+              "Invalid %s \"%s\" for label \"%s\"",
+              KEY_DEFAULT_VALUE, dv, name)));
+        }
       }
       label.setCopyMinScore(
           rc.getBoolean(LABEL, name, KEY_COPY_MIN_SCORE, false));
@@ -677,6 +707,15 @@ public class ProjectConfig extends VersionedMetaData {
       label.setRefPatterns(getStringListOrNull(rc, LABEL, name, KEY_Branch));
       labelSections.put(name, label);
     }
+  }
+
+  private boolean isInRange(short value, List<LabelValue> labelValues) {
+    for (LabelValue lv : labelValues) {
+      if (lv.getValue() == value) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private List<String> getStringListOrNull(Config rc, String section,
@@ -731,9 +770,8 @@ public class ProjectConfig extends VersionedMetaData {
   }
 
   private Map<String, GroupReference> readGroupList() throws IOException {
-    groupsByUUID = new HashMap<AccountGroup.UUID, GroupReference>();
-    Map<String, GroupReference> groupsByName =
-        new HashMap<String, GroupReference>();
+    groupsByUUID = new HashMap<>();
+    Map<String, GroupReference> groupsByName = new HashMap<>();
 
     BufferedReader br = new BufferedReader(new StringReader(readUTF8(GROUP_LIST)));
     String s;
@@ -775,20 +813,20 @@ public class ProjectConfig extends VersionedMetaData {
     }
     set(rc, ACCESS, null, KEY_INHERIT_FROM, p.getParentName());
 
-    set(rc, RECEIVE, null, KEY_REQUIRE_CONTRIBUTOR_AGREEMENT, p.getUseContributorAgreements(), Project.InheritableBoolean.INHERIT);
-    set(rc, RECEIVE, null, KEY_REQUIRE_SIGNED_OFF_BY, p.getUseSignedOffBy(), Project.InheritableBoolean.INHERIT);
-    set(rc, RECEIVE, null, KEY_REQUIRE_CHANGE_ID, p.getRequireChangeID(), Project.InheritableBoolean.INHERIT);
+    set(rc, RECEIVE, null, KEY_REQUIRE_CONTRIBUTOR_AGREEMENT, p.getUseContributorAgreements(), InheritableBoolean.INHERIT);
+    set(rc, RECEIVE, null, KEY_REQUIRE_SIGNED_OFF_BY, p.getUseSignedOffBy(), InheritableBoolean.INHERIT);
+    set(rc, RECEIVE, null, KEY_REQUIRE_CHANGE_ID, p.getRequireChangeID(), InheritableBoolean.INHERIT);
     set(rc, RECEIVE, null, KEY_MAX_OBJECT_SIZE_LIMIT, validMaxObjectSizeLimit(p.getMaxObjectSizeLimit()));
 
     set(rc, SUBMIT, null, KEY_ACTION, p.getSubmitType(), defaultSubmitAction);
-    set(rc, SUBMIT, null, KEY_MERGE_CONTENT, p.getUseContentMerge(), Project.InheritableBoolean.INHERIT);
+    set(rc, SUBMIT, null, KEY_MERGE_CONTENT, p.getUseContentMerge(), InheritableBoolean.INHERIT);
 
     set(rc, PROJECT, null, KEY_STATE, p.getState(), defaultStateValue);
 
     set(rc, DASHBOARD, null, KEY_DEFAULT, p.getDefaultDashboard());
     set(rc, DASHBOARD, null, KEY_LOCAL_DEFAULT, p.getLocalDefaultDashboard());
 
-    Set<AccountGroup.UUID> keepGroups = new HashSet<AccountGroup.UUID>();
+    Set<AccountGroup.UUID> keepGroups = new HashSet<>();
     saveAccountsSection(rc, keepGroups);
     saveContributorAgreements(rc, keepGroups);
     saveAccessSections(rc, keepGroups);
@@ -905,7 +943,7 @@ public class ProjectConfig extends VersionedMetaData {
 
   private List<String> ruleToStringList(
       List<PermissionRule> list, Set<AccountGroup.UUID> keepGroups) {
-    List<String> rules = new ArrayList<String>();
+    List<String> rules = new ArrayList<>();
     for (PermissionRule rule : sort(list)) {
       if (rule.getGroup().getUUID() != null) {
         keepGroups.add(rule.getGroup().getUUID());
@@ -919,12 +957,12 @@ public class ProjectConfig extends VersionedMetaData {
       Config rc, Set<AccountGroup.UUID> keepGroups) {
     AccessSection capability = accessSections.get(AccessSection.GLOBAL_CAPABILITIES);
     if (capability != null) {
-      Set<String> have = new HashSet<String>();
+      Set<String> have = new HashSet<>();
       for (Permission permission : sort(capability.getPermissions())) {
         have.add(permission.getName().toLowerCase());
 
         boolean needRange = GlobalCapability.hasRange(permission.getName());
-        List<String> rules = new ArrayList<String>();
+        List<String> rules = new ArrayList<>();
         for (PermissionRule rule : sort(permission.getRules())) {
           GroupReference group = rule.getGroup();
           if (group.getUUID() != null) {
@@ -964,12 +1002,12 @@ public class ProjectConfig extends VersionedMetaData {
         rc.unset(ACCESS, refName, KEY_GROUP_PERMISSIONS);
       }
 
-      Set<String> have = new HashSet<String>();
+      Set<String> have = new HashSet<>();
       for (Permission permission : sort(as.getPermissions())) {
         have.add(permission.getName().toLowerCase());
 
         boolean needRange = Permission.hasRange(permission.getName());
-        List<String> rules = new ArrayList<String>();
+        List<String> rules = new ArrayList<>();
         for (PermissionRule rule : sort(permission.getRules())) {
           GroupReference group = rule.getGroup();
           if (group.getUUID() != null) {
@@ -1009,14 +1047,7 @@ public class ProjectConfig extends VersionedMetaData {
       LabelType label = e.getValue();
       toUnset.remove(name);
       rc.setString(LABEL, name, KEY_FUNCTION, label.getFunctionName());
-
-      if (!LabelType.defaultAbbreviation(name)
-          .equals(label.getAbbreviation())) {
-        rc.setString(
-            LABEL, name, KEY_ABBREVIATION, label.getAbbreviation());
-      } else {
-        rc.unset(LABEL, name, KEY_ABBREVIATION);
-      }
+      rc.setInt(LABEL, name, KEY_DEFAULT_VALUE, label.getDefaultValue());
       if (label.isCopyMinScore()) {
         rc.setBoolean(LABEL, name, KEY_COPY_MIN_SCORE, true);
       } else {
@@ -1111,7 +1142,7 @@ public class ProjectConfig extends VersionedMetaData {
 
   private void error(ValidationError error) {
     if (validationErrors == null) {
-      validationErrors = new ArrayList<ValidationError>(4);
+      validationErrors = new ArrayList<>(4);
     }
     validationErrors.add(error);
   }
@@ -1130,7 +1161,7 @@ public class ProjectConfig extends VersionedMetaData {
   }
 
   private static <T extends Comparable<? super T>> List<T> sort(Collection<T> m) {
-    ArrayList<T> r = new ArrayList<T>(m);
+    ArrayList<T> r = new ArrayList<>(m);
     Collections.sort(r);
     return r;
   }

@@ -59,7 +59,8 @@ public class MyIdentitiesScreen extends SettingsScreen {
     });
     add(deleteIdentity);
 
-    if (Gerrit.getConfig().getAuthType() == AuthType.OPENID) {
+    if (Gerrit.getConfig().getAuthType() == AuthType.OPENID
+        || Gerrit.getConfig().getAuthType() == AuthType.OAUTH) {
       Button linkIdentity = new Button(Util.C.buttonLinkIdentity());
       linkIdentity.addClickHandler(new ClickHandler() {
         @Override
@@ -243,14 +244,14 @@ public class MyIdentitiesScreen extends SettingsScreen {
         //
         return "";
 
-      } else if (k.isScheme(OpenIdUrls.URL_GOOGLE)) {
+      } else if (k.isScheme("https://www.google.com/accounts/o8/id")) {
         return OpenIdUtil.C.nameGoogle();
+
+      } else if (k.isScheme(OpenIdUrls.URL_LAUNCHPAD)) {
+        return OpenIdUtil.C.nameLaunchpad();
 
       } else if (k.isScheme(OpenIdUrls.URL_YAHOO)) {
         return OpenIdUtil.C.nameYahoo();
-
-      } else if (k.isScheme(AccountExternalId.LEGACY_GAE)) {
-        return OpenIdUtil.C.nameGoogle() + " (Imported from Google AppEngine)";
 
       } else {
         return k.getExternalId();

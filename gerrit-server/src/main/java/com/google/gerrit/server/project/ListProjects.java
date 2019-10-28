@@ -21,22 +21,30 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.gerrit.common.data.GroupReference;
 import com.google.gerrit.common.errors.NoSuchGroupException;
+import com.google.gerrit.extensions.common.ProjectInfo;
+import com.google.gerrit.extensions.common.WebLinkInfo;
+import com.google.gerrit.extensions.restapi.BadRequestException;
 import com.google.gerrit.extensions.restapi.BinaryResult;
 import com.google.gerrit.extensions.restapi.RestReadView;
 import com.google.gerrit.extensions.restapi.TopLevelResource;
+import com.google.gerrit.extensions.restapi.Url;
 import com.google.gerrit.reviewdb.client.AccountGroup;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.OutputFormat;
 import com.google.gerrit.server.StringUtil;
+import com.google.gerrit.server.WebLinks;
 import com.google.gerrit.server.account.GroupCache;
 import com.google.gerrit.server.account.GroupControl;
 import com.google.gerrit.server.git.GitRepositoryManager;
-import com.google.gerrit.server.project.ProjectJson.ProjectInfo;
 import com.google.gerrit.server.util.TreeFormatter;
 import com.google.gson.reflect.TypeToken;
 import com.google.inject.Inject;
+import com.google.inject.Provider;
+
+import dk.brics.automaton.RegExp;
+import dk.brics.automaton.RunAutomaton;
 
 import org.eclipse.jgit.errors.RepositoryNotFoundException;
 import org.eclipse.jgit.lib.Constants;
@@ -105,6 +113,7 @@ public class ListProjects implements RestReadView<TopLevelResource> {
   private final GroupControl.Factory groupControlFactory;
   private final GitRepositoryManager repoManager;
   private final ProjectNode.Factory projectNodeFactory;
+  private final Provider<WebLinks> webLinks;
 
   @Deprecated
   @Option(name = "--format", usage = "(deprecated) output format")
@@ -158,6 +167,11 @@ public class ListProjects implements RestReadView<TopLevelResource> {
     this.matchSubstring = matchSubstring;
   }
 
+  @Option(name = "-r", metaVar = "REGEX", usage = "match project regex")
+  public void setMatchRegex(String matchRegex) {
+    this.matchRegex = matchRegex;
+  }
+
   @Option(name = "--has-acl-for", metaVar = "GROUP", usage =
       "displays only projects on which access rights for this group are directly assigned")
   public void setGroupUuid(AccountGroup.UUID groupUuid) {
@@ -173,18 +187,21 @@ public class ListProjects implements RestReadView<TopLevelResource> {
   private int start;
   private String matchPrefix;
   private String matchSubstring;
+  private String matchRegex;
   private AccountGroup.UUID groupUuid;
 
   @Inject
   protected ListProjects(CurrentUser currentUser, ProjectCache projectCache,
       GroupCache groupCache, GroupControl.Factory groupControlFactory,
-      GitRepositoryManager repoManager, ProjectNode.Factory projectNodeFactory) {
+      GitRepositoryManager repoManager, ProjectNode.Factory projectNodeFactory,
+      Provider<WebLinks> webLinks) {
     this.currentUser = currentUser;
     this.projectCache = projectCache;
     this.groupCache = groupCache;
     this.groupControlFactory = groupControlFactory;
     this.repoManager = repoManager;
     this.projectNodeFactory = projectNodeFactory;
+    this.webLinks = webLinks;
   }
 
   public List<String> getShowBranch() {
@@ -209,7 +226,7 @@ public class ListProjects implements RestReadView<TopLevelResource> {
   }
 
   @Override
-  public Object apply(TopLevelResource resource) {
+  public Object apply(TopLevelResource resource) throws BadRequestException {
     if (format == OutputFormat.TEXT) {
       ByteArrayOutputStream buf = new ByteArrayOutputStream();
       display(buf);
@@ -220,12 +237,13 @@ public class ListProjects implements RestReadView<TopLevelResource> {
     return apply();
   }
 
-  public Map<String, ProjectInfo> apply() {
+  public Map<String, ProjectInfo> apply() throws BadRequestException {
     format = OutputFormat.JSON;
     return display(null);
   }
 
-  public Map<String, ProjectInfo> display(OutputStream displayOutputStream) {
+  public Map<String, ProjectInfo> display(OutputStream displayOutputStream)
+      throws BadRequestException {
     PrintWriter stdout = null;
     if (displayOutputStream != null) {
       try {
@@ -240,10 +258,9 @@ public class ListProjects implements RestReadView<TopLevelResource> {
     int found = 0;
     Map<String, ProjectInfo> output = Maps.newTreeMap();
     Map<String, String> hiddenNames = Maps.newHashMap();
-    Set<String> rejected = new HashSet<String>();
+    Set<String> rejected = new HashSet<>();
 
-    final TreeMap<Project.NameKey, ProjectNode> treeMap =
-        new TreeMap<Project.NameKey, ProjectNode>();
+    final TreeMap<Project.NameKey, ProjectNode> treeMap = new TreeMap<>();
     try {
       for (final Project.NameKey projectName : scan()) {
         final ProjectState e = projectCache.get(projectName);
@@ -367,6 +384,13 @@ public class ListProjects implements RestReadView<TopLevelResource> {
             log.warn("Unexpected error reading " + projectName, err);
             continue;
           }
+
+          info.webLinks = Lists.newArrayList();
+          for (WebLinkInfo link : webLinks.get().getProjectLinks(projectName.get())) {
+            if (!Strings.isNullOrEmpty(link.name) && !Strings.isNullOrEmpty(link.url)) {
+              info.webLinks.add(link);
+            }
+          }
         }
 
         if (foundIndex++ < start) {
@@ -403,7 +427,7 @@ public class ListProjects implements RestReadView<TopLevelResource> {
       }
 
       for (ProjectInfo info : output.values()) {
-        info.finish();
+        info.id = Url.encode(info.name);
         info.name = null;
       }
       if (stdout == null) {
@@ -423,7 +447,7 @@ public class ListProjects implements RestReadView<TopLevelResource> {
     }
   }
 
-  private Iterable<Project.NameKey> scan() {
+  private Iterable<Project.NameKey> scan() throws BadRequestException {
     if (matchPrefix != null) {
       return projectCache.byName(matchPrefix);
     } else if (matchSubstring != null) {
@@ -434,6 +458,28 @@ public class ListProjects implements RestReadView<TopLevelResource> {
                   .contains(matchSubstring.toLowerCase(Locale.US));
             }
           });
+    } else if (matchRegex != null) {
+      if (matchRegex.startsWith("^")) {
+        matchRegex = matchRegex.substring(1);
+        if (matchRegex.endsWith("$") && !matchRegex.endsWith("\\$")) {
+          matchRegex = matchRegex.substring(0, matchRegex.length() - 1);
+        }
+      }
+      if (matchRegex.equals(".*")) {
+        return projectCache.all();
+      }
+      try {
+        final RunAutomaton a =
+            new RunAutomaton(new RegExp(matchRegex).toAutomaton());
+        return Iterables.filter(projectCache.all(),
+            new Predicate<Project.NameKey>() {
+              public boolean apply(Project.NameKey in) {
+                return a.run(in.get());
+              }
+            });
+      } catch (IllegalArgumentException e) {
+        throw new BadRequestException(e.getMessage());
+      }
     } else {
       return projectCache.all();
     }
@@ -441,7 +487,7 @@ public class ListProjects implements RestReadView<TopLevelResource> {
 
   private void printProjectTree(final PrintWriter stdout,
       final TreeMap<Project.NameKey, ProjectNode> treeMap) {
-    final SortedSet<ProjectNode> sortedNodes = new TreeSet<ProjectNode>();
+    final SortedSet<ProjectNode> sortedNodes = new TreeSet<>();
 
     // Builds the inheritance tree using a list.
     //

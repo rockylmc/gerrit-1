@@ -24,17 +24,20 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.gerrit.acceptance.AbstractDaemonTest;
 import com.google.gerrit.acceptance.RestResponse;
+import com.google.gerrit.extensions.api.GerritApi;
+import com.google.gerrit.extensions.api.projects.ProjectApi;
+import com.google.gerrit.extensions.api.projects.ProjectInput;
+import com.google.gerrit.extensions.common.InheritableBoolean;
+import com.google.gerrit.extensions.common.ProjectInfo;
+import com.google.gerrit.extensions.common.SubmitType;
+import com.google.gerrit.extensions.restapi.RestApiException;
 import com.google.gerrit.reviewdb.client.AccountGroup;
 import com.google.gerrit.reviewdb.client.Project;
-import com.google.gerrit.reviewdb.client.Project.InheritableBoolean;
-import com.google.gerrit.reviewdb.client.Project.SubmitType;
 import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.server.account.GroupCache;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.group.SystemGroupBackend;
-import com.google.gerrit.server.project.CreateProject;
 import com.google.gerrit.server.project.ProjectCache;
-import com.google.gerrit.server.project.ProjectJson.ProjectInfo;
 import com.google.gerrit.server.project.ProjectState;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
@@ -65,6 +68,21 @@ public class CreateProjectIT extends AbstractDaemonTest {
   @Inject
   private GitRepositoryManager git;
 
+  @Inject
+  private GerritApi gApi;
+
+  @Test
+  public void testCreateProjectApi() throws RestApiException, IOException {
+    final String newProjectName = "newProject";
+    ProjectApi projectApi = gApi.projects().name(newProjectName).create();
+    ProjectInfo p = projectApi.get();
+    assertEquals(newProjectName, p.name);
+    ProjectState projectState = projectCache.get(new Project.NameKey(newProjectName));
+    assertNotNull(projectState);
+    assertProjectInfo(projectState.getProject(), p);
+    assertHead(newProjectName, "refs/heads/master");
+  }
+
   @Test
   public void testCreateProject() throws IOException {
     final String newProjectName = "newProject";
@@ -80,7 +98,7 @@ public class CreateProjectIT extends AbstractDaemonTest {
 
   @Test
   public void testCreateProjectWithNameMismatch_BadRequest() throws IOException {
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.name = "otherName";
     RestResponse r = adminSession.put("/projects/someName", in);
     assertEquals(HttpStatus.SC_BAD_REQUEST, r.getStatusCode());
@@ -89,7 +107,7 @@ public class CreateProjectIT extends AbstractDaemonTest {
   @Test
   public void testCreateProjectWithProperties() throws IOException {
     final String newProjectName = "newProject";
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.description = "Test description";
     in.submitType = SubmitType.CHERRY_PICK;
     in.useContributorAgreements = InheritableBoolean.TRUE;
@@ -115,16 +133,17 @@ public class CreateProjectIT extends AbstractDaemonTest {
     RestResponse r = adminSession.put("/projects/" + parentName);
     r.consume();
     final String childName = "child";
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.parent = parentName;
     r = adminSession.put("/projects/" + childName, in);
     Project project = projectCache.get(new Project.NameKey(childName)).getProject();
     assertEquals(in.parent, project.getParentName());
   }
 
+  @Test
   public void testCreateChildProjectUnderNonExistingParent_UnprocessableEntity()
       throws IOException {
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.parent = "non-existing-project";
     RestResponse r = adminSession.put("/projects/child", in);
     assertEquals(HttpStatus.SC_UNPROCESSABLE_ENTITY, r.getStatusCode());
@@ -133,7 +152,7 @@ public class CreateProjectIT extends AbstractDaemonTest {
   @Test
   public void testCreateProjectWithOwner() throws IOException {
     final String newProjectName = "newProject";
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.owners = Lists.newArrayListWithCapacity(3);
     in.owners.add("Anonymous Users"); // by name
     in.owners.add(SystemGroupBackend.REGISTERED_USERS.get()); // by UUID
@@ -148,9 +167,10 @@ public class CreateProjectIT extends AbstractDaemonTest {
     assertProjectOwners(expectedOwnerIds, projectState);
   }
 
+  @Test
   public void testCreateProjectWithNonExistingOwner_UnprocessableEntity()
       throws IOException {
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.owners = Collections.singletonList("non-existing-group");
     RestResponse r = adminSession.put("/projects/newProject", in);
     assertEquals(HttpStatus.SC_UNPROCESSABLE_ENTITY, r.getStatusCode());
@@ -159,7 +179,7 @@ public class CreateProjectIT extends AbstractDaemonTest {
   @Test
   public void testCreatePermissionOnlyProject() throws IOException {
     final String newProjectName = "newProject";
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.permissionsOnly = true;
     adminSession.put("/projects/" + newProjectName, in);
     assertHead(newProjectName, RefNames.REFS_CONFIG);
@@ -168,7 +188,7 @@ public class CreateProjectIT extends AbstractDaemonTest {
   @Test
   public void testCreateProjectWithEmptyCommit() throws IOException {
     final String newProjectName = "newProject";
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.createEmptyCommit = true;
     adminSession.put("/projects/" + newProjectName, in);
     assertEmptyCommit(newProjectName, "refs/heads/master");
@@ -177,7 +197,7 @@ public class CreateProjectIT extends AbstractDaemonTest {
   @Test
   public void testCreateProjectWithBranches() throws IOException {
     final String newProjectName = "newProject";
-    CreateProject.Input in = new CreateProject.Input();
+    ProjectInput in = new ProjectInput();
     in.createEmptyCommit = true;
     in.branches = Lists.newArrayListWithCapacity(3);
     in.branches.add("refs/heads/test");

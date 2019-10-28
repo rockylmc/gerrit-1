@@ -21,22 +21,28 @@ import com.google.gerrit.extensions.restapi.ResourceNotFoundException;
 import com.google.gerrit.extensions.restapi.RestView;
 import com.google.gerrit.reviewdb.client.PatchLineComment;
 import com.google.gerrit.reviewdb.server.ReviewDb;
+import com.google.gerrit.server.PatchLineCommentsUtil;
+import com.google.gerrit.server.notedb.ChangeNotes;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
+@Singleton
 class Comments implements ChildCollection<RevisionResource, CommentResource> {
   private final DynamicMap<RestView<CommentResource>> views;
-  private final Provider<ListComments> list;
+  private final ListComments list;
   private final Provider<ReviewDb> dbProvider;
+  private final PatchLineCommentsUtil plcUtil;
 
   @Inject
   Comments(DynamicMap<RestView<CommentResource>> views,
-      Provider<ListComments> list,
-      Provider<ReviewDb> dbProvider) {
+      ListComments list, Provider<ReviewDb> dbProvider,
+      PatchLineCommentsUtil plcUtil) {
     this.views = views;
     this.list = list;
     this.dbProvider = dbProvider;
+    this.plcUtil = plcUtil;
   }
 
   @Override
@@ -46,15 +52,17 @@ class Comments implements ChildCollection<RevisionResource, CommentResource> {
 
   @Override
   public RestView<RevisionResource> list() {
-    return list.get();
+    return list;
   }
 
   @Override
   public CommentResource parse(RevisionResource rev, IdString id)
       throws ResourceNotFoundException, OrmException {
     String uuid = id.get();
-    for (PatchLineComment c : dbProvider.get().patchComments()
-        .publishedByPatchSet(rev.getPatchSet().getId())) {
+    ChangeNotes notes = rev.getNotes();
+
+    for (PatchLineComment c : plcUtil.publishedByPatchSet(dbProvider.get(),
+        notes, rev.getPatchSet().getId())) {
       if (uuid.equals(c.getKey().get())) {
         return new CommentResource(rev, c);
       }

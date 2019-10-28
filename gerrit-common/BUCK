@@ -6,6 +6,11 @@ ANNOTATIONS = [
   SRC + 'common/auth/SignInRequired.java',
 ]
 
+EXCLUDES = [
+  SRC + 'common/PluginData.java',
+  SRC + 'common/FileUtil.java',
+]
+
 java_library(
   name = 'annotations',
   srcs = ANNOTATIONS,
@@ -14,15 +19,14 @@ java_library(
 
 gwt_module(
   name = 'client',
-  srcs = glob([SRC + 'common/**/*.java']),
-  gwtxml = SRC + 'Common.gwt.xml',
+  srcs = glob([SRC + 'common/**/*.java'], excludes = EXCLUDES),
+  gwt_xml = SRC + 'Common.gwt.xml',
   deps = [
+    ':annotations',
+    '//gerrit-extension-api:client',
     '//gerrit-patch-jgit:client',
     '//gerrit-prettify:client',
     '//gerrit-reviewdb:client',
-  ],
-  compile_deps = [
-    ':annotations',
     '//lib:gwtjsonrpc',
     '//lib:gwtorm',
     '//lib/jgit:jgit',
@@ -35,11 +39,13 @@ java_library(
   srcs = glob([SRC + 'common/**/*.java'], excludes = ANNOTATIONS),
   deps = [
     ':annotations',
+    '//gerrit-extension-api:api',
     '//gerrit-patch-jgit:server',
     '//gerrit-prettify:server',
     '//gerrit-reviewdb:server',
     '//lib:gwtjsonrpc',
     '//lib:gwtorm',
+    '//lib:guava',
     '//lib/jgit:jgit',
   ],
   visibility = ['PUBLIC'],
@@ -50,6 +56,7 @@ java_test(
   srcs = glob(['src/test/java/**/*.java']),
   deps = [
     ':client',
+    '//lib:guava',
     '//lib:junit',
   ],
   source_under_test = [':client'],

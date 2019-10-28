@@ -14,16 +14,9 @@
 
 package com.google.gerrit.server.query.change;
 
-import com.google.gwtorm.server.OrmException;
-import com.google.gwtorm.server.ResultSet;
+import com.google.gerrit.server.query.DataSource;
 
-public interface ChangeDataSource {
-  /** @return an estimate of the number of results from {@link #read()}. */
-  public int getCardinality();
-
+public interface ChangeDataSource extends DataSource<ChangeData> {
   /** @return true if all returned ChangeData.hasChange() will be true. */
   public boolean hasChange();
-
-  /** @return read from the database and return the changes. */
-  public abstract ResultSet<ChangeData> read() throws OrmException;
 }

@@ -1014,7 +1014,8 @@ image::images/user-review-ui-side-by-side-diff-screen-intraline-difference.png[w
 Controls whether syntax highlighting should be enabled.
 +
 The language for the syntax highlighting is automatically detected from
-the file extension.
+the file extension. The language can also be set manually by selecting
+it from the `Language` drop-down list.
 +
 image::images/user-review-ui-side-by-side-diff-screen-syntax-coloring.png[width=800, link="images/user-review-ui-side-by-side-diff-screen-syntax-coloring.png"]
 
@@ -1029,6 +1030,17 @@ Controls whether tabs are highlighted.
 - `Line Numbers`:
 +
 Controls whether line numbers are shown.
+
+- `Empty Pane`:
++
+Controls whether empty panes are shown or not. The Left pane is empty when a
+file was added; the right pane is empty when a file was deleted.
+
+- `Left Side`:
++
+Controls whether the left side is shown. This preference is not
+persistent and is ignored by the `Save` button. Every time a
+patch diff is opened, this preference is reset to `Show`.
 
 - `Top Menu`:
 +
@@ -1058,6 +1070,8 @@ If `Slow` is selected all file contents are attached to the browser's
 DOM tree, which makes the rendering slow for large files. The advantage
 of this setting is that `Ctrl+F` can be used to search in the complete
 file.
++
+Large files that exceed 4000 lines will not be fully rendered.
 
 [[keyboard-shortcuts]]
 == Keyboard Shortcuts

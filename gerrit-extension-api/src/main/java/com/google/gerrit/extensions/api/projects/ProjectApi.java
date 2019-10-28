@@ -14,6 +14,39 @@
 
 package com.google.gerrit.extensions.api.projects;
 
+import com.google.gerrit.extensions.common.ProjectInfo;
+import com.google.gerrit.extensions.restapi.NotImplementedException;
+import com.google.gerrit.extensions.restapi.RestApiException;
+
 public interface ProjectApi {
+  ProjectApi create() throws RestApiException;
+  ProjectApi create(ProjectInput in) throws RestApiException;
+  ProjectInfo get();
   BranchApi branch(String ref);
+
+  /**
+   * A default implementation which allows source compatibility
+   * when adding new methods to the interface.
+   **/
+  public class NotImplemented implements ProjectApi {
+    @Override
+    public ProjectApi create() throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public ProjectApi create(ProjectInput in) throws RestApiException {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public ProjectInfo get() {
+      throw new NotImplementedException();
+    }
+
+    @Override
+    public BranchApi branch(String ref) {
+      throw new NotImplementedException();
+    }
+  }
 }

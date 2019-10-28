@@ -47,6 +47,7 @@ import com.google.common.net.HttpHeaders;
 import com.google.gerrit.audit.AuditService;
 import com.google.gerrit.audit.HttpAuditEvent;
 import com.google.gerrit.common.Nullable;
+import com.google.gerrit.extensions.registration.DynamicItem;
 import com.google.gerrit.extensions.registration.DynamicMap;
 import com.google.gerrit.extensions.restapi.AcceptsCreate;
 import com.google.gerrit.extensions.restapi.AcceptsPost;
@@ -102,6 +103,7 @@ import org.slf4j.LoggerFactory;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.EOFException;
+import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -151,13 +153,13 @@ public class RestApiServlet extends HttpServlet {
 
   public static class Globals {
     final Provider<CurrentUser> currentUser;
-    final Provider<WebSession> webSession;
+    final DynamicItem<WebSession> webSession;
     final Provider<ParameterParser> paramParser;
     final AuditService auditService;
 
     @Inject
     Globals(Provider<CurrentUser> currentUser,
-        Provider<WebSession> webSession,
+        DynamicItem<WebSession> webSession,
         Provider<ParameterParser> paramParser,
         AuditService auditService) {
       this.currentUser = currentUser;
@@ -206,7 +208,7 @@ public class RestApiServlet extends HttpServlet {
       RestResource rsrc = TopLevelResource.INSTANCE;
       ViewData viewData = new ViewData(null, null);
       if (path.isEmpty()) {
-        if ("GET".equals(req.getMethod())) {
+        if (isGetOrHead(req)) {
           viewData = new ViewData(null, rc.list());
         } else if (rc instanceof AcceptsPost && "POST".equals(req.getMethod())) {
           @SuppressWarnings("unchecked")
@@ -247,7 +249,7 @@ public class RestApiServlet extends HttpServlet {
             (RestCollection<RestResource, RestResource>) viewData.view;
 
         if (path.isEmpty()) {
-          if ("GET".equals(req.getMethod())) {
+          if (isGetOrHead(req)) {
             viewData = new ViewData(null, c.list());
           } else if (c instanceof AcceptsPost && "POST".equals(req.getMethod())) {
             @SuppressWarnings("unchecked")
@@ -363,7 +365,7 @@ public class RestApiServlet extends HttpServlet {
   }
 
   private static boolean notModified(HttpServletRequest req, RestResource rsrc) {
-    if (!"GET".equals(req.getMethod())) {
+    if (!isGetOrHead(req)) {
       return false;
     }
 
@@ -386,7 +388,7 @@ public class RestApiServlet extends HttpServlet {
 
   private static <T> void configureCaching(HttpServletRequest req,
       HttpServletResponse res, RestResource rsrc, CacheControl c) {
-    if ("GET".equals(req.getMethod())) {
+    if (isGetOrHead(req)) {
       switch (c.getType()) {
         case NONE:
         default:
@@ -716,11 +718,13 @@ public class RestApiServlet extends HttpServlet {
         res.setHeader("Content-Length", Long.toString(len));
       }
 
-      OutputStream dst = res.getOutputStream();
-      try {
-        bin.writeTo(dst);
-      } finally {
-        dst.close();
+      if (req == null || !"HEAD".equals(req.getMethod())) {
+        OutputStream dst = res.getOutputStream();
+        try {
+          bin.writeTo(dst);
+        } finally {
+          dst.close();
+        }
       }
     } finally {
       appResult.close();
@@ -737,10 +741,16 @@ public class RestApiServlet extends HttpServlet {
       b64 = new BinaryResult() {
         @Override
         public void writeTo(OutputStream out) throws IOException {
-          OutputStream e = BaseEncoding.base64().encodingStream(
-              new OutputStreamWriter(out, ISO_8859_1));
-          src.writeTo(e);
-          e.flush();
+          try (OutputStreamWriter w = new OutputStreamWriter(
+                new FilterOutputStream(out) {
+                  @Override
+                  public void close() {
+                    // Do not close out, but only w and e.
+                  }
+                }, ISO_8859_1);
+              OutputStream e = BaseEncoding.base64().encodingStream(w)) {
+            src.writeTo(e);
+          }
         }
       };
     }
@@ -787,6 +797,8 @@ public class RestApiServlet extends HttpServlet {
       // is chosen, look for the projection based upon GET as the method as
       // the client thinks it is a nested collection.
       method = "GET";
+    } else if ("HEAD".equals(method)) {
+      method = "GET";
     }
 
     List<String> p = splitProjection(projection);
@@ -815,6 +827,13 @@ public class RestApiServlet extends HttpServlet {
     RestView<RestResource> core = views.get("gerrit", name);
     if (core != null) {
       return new ViewData(null, core);
+    } else {
+      core = views.get("gerrit", "GET." + p.get(0));
+      if (core instanceof AcceptsPost && "POST".equals(method)) {
+        @SuppressWarnings("unchecked")
+        AcceptsPost<RestResource> ap = (AcceptsPost<RestResource>) core;
+        return new ViewData(null, ap.post(rsrc));
+      }
     }
 
     Map<String, RestView<RestResource>> r = Maps.newTreeMap();
@@ -879,9 +898,12 @@ public class RestApiServlet extends HttpServlet {
     user.setAccessPath(AccessPath.REST_API);
   }
 
+  private static boolean isGetOrHead(HttpServletRequest req) {
+    return "GET".equals(req.getMethod()) || "HEAD".equals(req.getMethod());
+  }
+
   private static boolean isStateChange(HttpServletRequest req) {
-    String method = req.getMethod();
-    return !("GET".equals(method) || "HEAD".equals(method));
+    return !isGetOrHead(req);
   }
 
   private void checkRequiresCapability(ViewData viewData) throws AuthException {
@@ -913,12 +935,12 @@ public class RestApiServlet extends HttpServlet {
       CacheControl c) throws IOException {
     res.setStatus(statusCode);
     configureCaching(req, res, null, c);
-    replyText(null, res, msg);
+    replyText(req, res, msg);
   }
 
   static void replyText(@Nullable HttpServletRequest req,
       HttpServletResponse res, String text) throws IOException {
-    if ((req == null || "GET".equals(req.getMethod())) && isMaybeHTML(text)) {
+    if ((req == null || isGetOrHead(req)) && isMaybeHTML(text)) {
       replyJson(req, res, ImmutableMultimap.of("pp", "0"), new JsonPrimitive(text));
     } else {
       if (!text.endsWith("\n")) {

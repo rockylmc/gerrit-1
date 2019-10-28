@@ -130,7 +130,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
 
     expect(schema.submoduleSubscriptions()).andReturn(subscriptions);
     final ResultSet<SubmoduleSubscription> emptySubscriptions =
-        new ListResultSet<SubmoduleSubscription>(new ArrayList<SubmoduleSubscription>());
+        new ListResultSet<>(new ArrayList<SubmoduleSubscription>());
     expect(subscriptions.bySubmodule(branchNameKey)).andReturn(
         emptySubscriptions);
 
@@ -296,8 +296,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new Branch.NameKey(new Project.NameKey("dest-project"),
             "refs/heads/master");
 
-    final List<SubmoduleSubscription> subscriptionsToInsert =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> subscriptionsToInsert = new ArrayList<>();
     subscriptionsToInsert
         .add(new SubmoduleSubscription(mergedBranch, new Branch.NameKey(
             new Project.NameKey("source-a"), "refs/heads/master"), "source-a"));
@@ -354,8 +353,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new Branch.NameKey(new Project.NameKey("dest-project"),
             "refs/heads/master");
 
-    final List<SubmoduleSubscription> subscriptionsToInsert =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> subscriptionsToInsert = new ArrayList<>();
     subscriptionsToInsert
         .add(new SubmoduleSubscription(mergedBranch, new Branch.NameKey(
             new Project.NameKey("source-a"), "refs/heads/master"), "source-a"));
@@ -412,8 +410,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new Branch.NameKey(new Project.NameKey("dest-project"),
             "refs/heads/master");
 
-    final List<SubmoduleSubscription> subscriptionsToInsert =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> subscriptionsToInsert = new ArrayList<>();
     subscriptionsToInsert
         .add(new SubmoduleSubscription(mergedBranch, new Branch.NameKey(
             new Project.NameKey("source-a"), "refs/heads/test-a"), "source-a"));
@@ -467,14 +464,12 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new Branch.NameKey(new Project.NameKey("dest-project"),
             "refs/heads/master");
 
-    final List<SubmoduleSubscription> subscriptionsToInsert =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> subscriptionsToInsert = new ArrayList<>();
     subscriptionsToInsert.add(new SubmoduleSubscription(mergedBranch,
         new Branch.NameKey(new Project.NameKey("source"), "refs/heads/master"),
         "source"));
 
-    final List<SubmoduleSubscription> oldOnesToMergedBranch =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> oldOnesToMergedBranch = new ArrayList<>();
     oldOnesToMergedBranch.add(new SubmoduleSubscription(mergedBranch,
         new Branch.NameKey(new Project.NameKey("old-source"),
             "refs/heads/master"), "old-source"));
@@ -534,15 +529,13 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new SubmoduleSubscription(mergedBranch, new Branch.NameKey(new Project.NameKey(
             "old"), "refs/heads/master"), "old");
 
-    final List<SubmoduleSubscription> extractedsubscriptions =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> extractedsubscriptions = new ArrayList<>();
     extractedsubscriptions.add(new SubmoduleSubscription(mergedBranch,
         new Branch.NameKey(new Project.NameKey("new"), "refs/heads/master"),
         "new"));
     extractedsubscriptions.add(old);
 
-    final List<SubmoduleSubscription> oldOnesToMergedBranch =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> oldOnesToMergedBranch = new ArrayList<>();
     oldOnesToMergedBranch.add(old);
 
     doOnlySubscriptionTableOperations(sb.toString(), mergedBranch,
@@ -567,11 +560,8 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new Branch.NameKey(new Project.NameKey("dest-project"),
             "refs/heads/master");
 
-    final List<SubmoduleSubscription> extractedsubscriptions =
-        new ArrayList<SubmoduleSubscription>();
-
-    final List<SubmoduleSubscription> oldOnesToMergedBranch =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> extractedsubscriptions = new ArrayList<>();
+    List<SubmoduleSubscription> oldOnesToMergedBranch = new ArrayList<>();
     oldOnesToMergedBranch
         .add(new SubmoduleSubscription(mergedBranch, new Branch.NameKey(
             new Project.NameKey("source-a"), "refs/heads/master"), "source-a"));
@@ -616,11 +606,10 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new Change.Key(sourceMergeTip.toObjectId().getName()), new Change.Id(1),
         new Account.Id(1), sourceBranchNameKey, TimeUtil.nowTs());
 
-    final Map<Change.Id, CodeReviewCommit> mergedCommits =
-        new HashMap<Change.Id, CodeReviewCommit>();
+    final Map<Change.Id, CodeReviewCommit> mergedCommits = new HashMap<>();
     mergedCommits.put(submittedChange.getId(), codeReviewCommit);
 
-    final List<Change> submitted = new ArrayList<Change>();
+    final List<Change> submitted = new ArrayList<>();
     submitted.add(submittedChange);
 
     final Repository targetRepository = createWorkRepository();
@@ -638,7 +627,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
 
     expect(schema.submoduleSubscriptions()).andReturn(subscriptions);
     final ResultSet<SubmoduleSubscription> subscribers =
-        new ListResultSet<SubmoduleSubscription>(Collections
+        new ListResultSet<>(Collections
             .singletonList(new SubmoduleSubscription(targetBranchNameKey,
                 sourceBranchNameKey, "source-project")));
     expect(subscriptions.bySubmodule(sourceBranchNameKey)).andReturn(
@@ -647,7 +636,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
     expect(repoManager.openRepository(targetBranchNameKey.getParentKey()))
         .andReturn(targetRepository).anyTimes();
 
-    Capture<RefUpdate> ruCapture = new Capture<RefUpdate>();
+    Capture<RefUpdate> ruCapture = new Capture<>();
     gitRefUpdated.fire(eq(targetBranchNameKey.getParentKey()),
         capture(ruCapture));
     changeHooks.doRefUpdatedHook(eq(targetBranchNameKey),
@@ -655,7 +644,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
 
     expect(schema.submoduleSubscriptions()).andReturn(subscriptions);
     final ResultSet<SubmoduleSubscription> emptySubscriptions =
-      new ListResultSet<SubmoduleSubscription>(new ArrayList<SubmoduleSubscription>());
+        new ListResultSet<>(new ArrayList<SubmoduleSubscription>());
     expect(subscriptions.bySubmodule(targetBranchNameKey)).andReturn(
         emptySubscriptions);
 
@@ -722,11 +711,10 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new Change.Key(sourceMergeTip.toObjectId().getName()), new Change.Id(1),
         new Account.Id(1), sourceBranchNameKey, TimeUtil.nowTs());
 
-    final Map<Change.Id, CodeReviewCommit> mergedCommits =
-        new HashMap<Change.Id, CodeReviewCommit>();
+    final Map<Change.Id, CodeReviewCommit> mergedCommits = new HashMap<>();
     mergedCommits.put(submittedChange.getId(), codeReviewCommit);
 
-    final List<Change> submitted = new ArrayList<Change>();
+    final List<Change> submitted = new ArrayList<>();
     submitted.add(submittedChange);
 
     final Repository targetRepository = createWorkRepository();
@@ -744,7 +732,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
 
     expect(schema.submoduleSubscriptions()).andReturn(subscriptions);
     final ResultSet<SubmoduleSubscription> subscribers =
-        new ListResultSet<SubmoduleSubscription>(Collections
+        new ListResultSet<>(Collections
             .singletonList(new SubmoduleSubscription(targetBranchNameKey,
                 sourceBranchNameKey, "source-project")));
     expect(subscriptions.bySubmodule(sourceBranchNameKey)).andReturn(
@@ -753,7 +741,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
     expect(repoManager.openRepository(targetBranchNameKey.getParentKey()))
         .andReturn(targetRepository).anyTimes();
 
-    Capture<RefUpdate> ruCapture = new Capture<RefUpdate>();
+    Capture<RefUpdate> ruCapture = new Capture<>();
     gitRefUpdated.fire(eq(targetBranchNameKey.getParentKey()),
         capture(ruCapture));
     changeHooks.doRefUpdatedHook(eq(targetBranchNameKey),
@@ -811,8 +799,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
         new Branch.NameKey(new Project.NameKey("dest-project"),
             "refs/heads/master");
 
-    final List<SubmoduleSubscription> subscriptionsToInsert =
-        new ArrayList<SubmoduleSubscription>();
+    List<SubmoduleSubscription> subscriptionsToInsert = new ArrayList<>();
     subscriptionsToInsert.add(new SubmoduleSubscription(mergedBranch,
         new Branch.NameKey(new Project.NameKey("source"), sourceBranchName),
         "source"));
@@ -886,10 +873,9 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
 
     expect(schema.submoduleSubscriptions()).andReturn(subscriptions);
     expect(subscriptions.bySuperProject(mergedBranch)).andReturn(
-        new ListResultSet<SubmoduleSubscription>(previousSubscriptions));
+        new ListResultSet<>(previousSubscriptions));
 
-    SortedSet<Project.NameKey> existingProjects =
-        new TreeSet<Project.NameKey>();
+    SortedSet<Project.NameKey> existingProjects = new TreeSet<>();
 
     for (SubmoduleSubscription extracted : extractedSubscriptions) {
       existingProjects.add(extracted.getSubmodule().getParentKey());
@@ -899,8 +885,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
       expect(repoManager.list()).andReturn(existingProjects);
     }
 
-    final Set<SubmoduleSubscription> alreadySubscribeds =
-        new HashSet<SubmoduleSubscription>();
+    final Set<SubmoduleSubscription> alreadySubscribeds = new HashSet<>();
     for (SubmoduleSubscription s : extractedSubscriptions) {
       if (previousSubscriptions.contains(s)) {
         alreadySubscribeds.add(s);
@@ -908,9 +893,9 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
     }
 
     final Set<SubmoduleSubscription> subscriptionsToRemove =
-        new HashSet<SubmoduleSubscription>(previousSubscriptions);
+        new HashSet<>(previousSubscriptions);
     final List<SubmoduleSubscription> subscriptionsToInsert =
-        new ArrayList<SubmoduleSubscription>(extractedSubscriptions);
+        new ArrayList<>(extractedSubscriptions);
 
     subscriptionsToRemove.removeAll(subscriptionsToInsert);
     subscriptionsToInsert.removeAll(alreadySubscribeds);
@@ -925,7 +910,7 @@ public class SubmoduleOpTest extends LocalDiskRepositoryTestCase {
 
     expect(schema.submoduleSubscriptions()).andReturn(subscriptions);
     expect(subscriptions.bySubmodule(mergedBranch)).andReturn(
-        new ListResultSet<SubmoduleSubscription>(new ArrayList<SubmoduleSubscription>()));
+        new ListResultSet<>(new ArrayList<SubmoduleSubscription>()));
 
     schema.close();
 

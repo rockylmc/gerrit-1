@@ -19,15 +19,18 @@ import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_LABEL;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_PATCH_SET;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_STATUS;
 import static com.google.gerrit.server.notedb.ChangeNoteUtil.FOOTER_SUBMITTED_WITH;
-import static com.google.gerrit.server.notedb.ChangeNoteUtil.GERRIT_PLACEHOLDER_HOST;
+import static com.google.gerrit.server.notedb.CommentsInNotesUtil.getCommentPsId;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
 import com.google.gerrit.common.data.SubmitRecord;
 import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.Change;
+import com.google.gerrit.reviewdb.client.PatchLineComment;
 import com.google.gerrit.reviewdb.client.PatchSet;
 import com.google.gerrit.reviewdb.client.Project;
 import com.google.gerrit.server.GerritPersonIdent;
@@ -35,22 +38,22 @@ import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.account.AccountCache;
 import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.MetaDataUpdate;
-import com.google.gerrit.server.git.VersionedMetaData;
 import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.server.project.ProjectCache;
 import com.google.gerrit.server.util.LabelVote;
+import com.google.gwtorm.server.OrmException;
 import com.google.inject.assistedinject.Assisted;
 import com.google.inject.assistedinject.AssistedInject;
 
-import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.lib.CommitBuilder;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.PersonIdent;
-import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.notes.NoteMap;
 import org.eclipse.jgit.revwalk.FooterKey;
 import org.eclipse.jgit.revwalk.RevCommit;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
@@ -66,7 +69,7 @@ import java.util.Map;
  * <p>
  * This class is not thread-safe.
  */
-public class ChangeUpdate extends VersionedMetaData {
+public class ChangeUpdate extends AbstractChangeUpdate {
   public interface Factory {
     ChangeUpdate create(ChangeControl ctl);
     ChangeUpdate create(ChangeControl ctl, Date when);
@@ -75,19 +78,16 @@ public class ChangeUpdate extends VersionedMetaData {
         Comparator<String> labelNameComparator);
   }
 
-  private final NotesMigration migration;
-  private final GitRepositoryManager repoManager;
   private final AccountCache accountCache;
-  private final MetaDataUpdate.User updateFactory;
-  private final ChangeControl ctl;
-  private final PersonIdent serverIdent;
-  private final Date when;
   private final Map<String, Optional<Short>> approvals;
   private final Map<Account.Id, ReviewerState> reviewers;
   private Change.Status status;
   private String subject;
-  private PatchSet.Id psId;
   private List<SubmitRecord> submitRecords;
+  private final CommentsInNotesUtil commentsUtil;
+  private List<PatchLineComment> commentsForBase;
+  private List<PatchLineComment> commentsForPs;
+  private String changeMessage;
 
   @AssistedInject
   private ChangeUpdate(
@@ -98,9 +98,10 @@ public class ChangeUpdate extends VersionedMetaData {
       MetaDataUpdate.User updateFactory,
       ProjectCache projectCache,
       IdentifiedUser user,
-      @Assisted ChangeControl ctl) {
+      @Assisted ChangeControl ctl,
+      CommentsInNotesUtil commentsUtil) {
     this(serverIdent, repoManager, migration, accountCache, updateFactory,
-        projectCache, ctl, serverIdent.getWhen());
+        projectCache, ctl, serverIdent.getWhen(), commentsUtil);
   }
 
   @AssistedInject
@@ -112,10 +113,12 @@ public class ChangeUpdate extends VersionedMetaData {
       MetaDataUpdate.User updateFactory,
       ProjectCache projectCache,
       @Assisted ChangeControl ctl,
-      @Assisted Date when) {
-    this(serverIdent, repoManager, migration, accountCache, updateFactory,
-        ctl, when,
-        projectCache.get(getProjectName(ctl)).getLabelTypes().nameComparator());
+      @Assisted Date when,
+      CommentsInNotesUtil commentsUtil) {
+    this(serverIdent, repoManager, migration, accountCache, updateFactory, ctl,
+        when,
+        projectCache.get(getProjectName(ctl)).getLabelTypes().nameComparator(),
+        commentsUtil);
   }
 
   private static Project.NameKey getProjectName(ChangeControl ctl) {
@@ -131,28 +134,15 @@ public class ChangeUpdate extends VersionedMetaData {
       MetaDataUpdate.User updateFactory,
       @Assisted ChangeControl ctl,
       @Assisted Date when,
-      @Assisted Comparator<String> labelNameComparator) {
-    this.repoManager = repoManager;
-    this.migration = migration;
+      @Assisted Comparator<String> labelNameComparator,
+      CommentsInNotesUtil commentsUtil) {
+    super(migration, repoManager, updateFactory, ctl, serverIdent, when);
     this.accountCache = accountCache;
-    this.updateFactory = updateFactory;
-    this.ctl = ctl;
-    this.when = when;
-    this.serverIdent = serverIdent;
+    this.commentsUtil = commentsUtil;
     this.approvals = Maps.newTreeMap(labelNameComparator);
     this.reviewers = Maps.newLinkedHashMap();
-  }
-
-  public Change getChange() {
-    return ctl.getChange();
-  }
-
-  public IdentifiedUser getUser() {
-    return (IdentifiedUser) ctl.getCurrentUser();
-  }
-
-  public Date getWhen() {
-    return when;
+    this.commentsForPs = Lists.newArrayList();
+    this.commentsForBase = Lists.newArrayList();
   }
 
   public void setStatus(Change.Status status) {
@@ -180,10 +170,22 @@ public class ChangeUpdate extends VersionedMetaData {
     this.subject = subject;
   }
 
-  public void setPatchSetId(PatchSet.Id psId) {
-    checkArgument(psId == null
-        || psId.getParentKey().equals(getChange().getId()));
-    this.psId = psId;
+  public void setChangeMessage(String changeMessage) {
+    this.changeMessage = changeMessage;
+  }
+
+  public void putComment(PatchLineComment comment) {
+    checkArgument(psId != null,
+        "setPatchSetId must be called before putComment");
+    checkArgument(getCommentPsId(comment).equals(psId),
+        "Comment on %s doesn't match previous patch set %s",
+        getCommentPsId(comment), psId);
+    checkArgument(comment.getRevId() != null);
+    if (comment.getSide() == 0) {
+      commentsForBase.add(comment);
+    } else {
+      commentsForPs.add(comment);
+    }
   }
 
   public void putReviewer(Account.Id reviewer, ReviewerState type) {
@@ -195,85 +197,59 @@ public class ChangeUpdate extends VersionedMetaData {
     reviewers.put(reviewer, ReviewerState.REMOVED);
   }
 
-  private void load() throws IOException {
-    if (migration.write() && getRevision() == null) {
-      Repository repo = repoManager.openRepository(getChange().getProject());
-      try {
-        load(repo);
-      } catch (ConfigInvalidException e) {
-        throw new IOException(e);
-      } finally {
-        repo.close();
-      }
+  /** @return the tree id for the updated tree */
+  private ObjectId storeCommentsInNotes() throws OrmException, IOException {
+    ChangeNotes notes = ctl.getNotes().load();
+    NoteMap noteMap = notes.getNoteMap();
+    if (noteMap == null) {
+      noteMap = NoteMap.newEmptyMap();
     }
-  }
+    if (commentsForPs.isEmpty() && commentsForBase.isEmpty()) {
+      return null;
+    }
 
-  @Override
-  public RevCommit commit(MetaDataUpdate md) throws IOException {
-    throw new UnsupportedOperationException("use commit()");
+    Multimap<PatchSet.Id, PatchLineComment> allCommentsOnBases =
+        notes.getBaseComments();
+    Multimap<PatchSet.Id, PatchLineComment> allCommentsOnPs =
+        notes.getPatchSetComments();
+
+    // This writes all comments for the base of this PS to the note map.
+    if (!commentsForBase.isEmpty()) {
+      List<PatchLineComment> baseCommentsForThisPs =
+          new ArrayList<>(allCommentsOnBases.get(psId));
+      baseCommentsForThisPs.addAll(commentsForBase);
+      commentsUtil.writeCommentsToNoteMap(noteMap, baseCommentsForThisPs,
+          inserter);
+    }
+
+    // This write all comments for this PS to the note map.
+    if (!commentsForPs.isEmpty()) {
+      List<PatchLineComment> commentsForThisPs =
+          new ArrayList<>(allCommentsOnPs.get(psId));
+      commentsForThisPs.addAll(commentsForPs);
+      commentsUtil.writeCommentsToNoteMap(noteMap, commentsForThisPs, inserter);
+    }
+    return noteMap.writeTree(inserter);
   }
 
   public RevCommit commit() throws IOException {
     BatchMetaDataUpdate batch = openUpdate();
     try {
-      batch.write(new CommitBuilder());
-      return batch.commit();
+      CommitBuilder builder = new CommitBuilder();
+      if (migration.write()) {
+        ObjectId treeId = storeCommentsInNotes();
+        if (treeId != null) {
+          builder.setTreeId(treeId);
+        }
+      }
+      batch.write(builder);
+      RevCommit c = batch.commit();
+      return c;
+    } catch (OrmException e) {
+      throw new IOException(e);
     } finally {
       batch.close();
     }
-  }
-
-  private PersonIdent newIdent(Account author, Date when) {
-    return new PersonIdent(
-        author.getFullName(),
-        author.getId().get() + "@" + GERRIT_PLACEHOLDER_HOST,
-        when, serverIdent.getTimeZone());
-  }
-
-  @Override
-  public BatchMetaDataUpdate openUpdate(MetaDataUpdate update) throws IOException {
-    throw new UnsupportedOperationException("use openUpdate()");
-  }
-
-  public BatchMetaDataUpdate openUpdate() throws IOException {
-    if (migration.write()) {
-      load();
-      MetaDataUpdate md =
-          updateFactory.create(getChange().getProject(), getUser());
-      md.setAllowEmpty(true);
-      return super.openUpdate(md);
-    }
-    return new BatchMetaDataUpdate() {
-      @Override
-      public void write(CommitBuilder commit) {
-        // Do nothing.
-      }
-
-      @Override
-      public void write(VersionedMetaData config, CommitBuilder commit) {
-        // Do nothing.
-      }
-
-      @Override
-      public RevCommit createRef(String refName) {
-        return null;
-      }
-
-      @Override
-      public RevCommit commit() {
-        return null;
-      }
-
-      @Override
-      public RevCommit commitAt(ObjectId revision) {
-        return null;
-      }
-
-      @Override
-      public void close() {
-        // Do nothing.
-      }
-    };
   }
 
   @Override
@@ -297,6 +273,13 @@ public class ChangeUpdate extends VersionedMetaData {
       msg.append("Update patch set ").append(ps);
     }
     msg.append("\n\n");
+
+    if (changeMessage != null) {
+      msg.append(changeMessage);
+      msg.append("\n\n");
+    }
+
+
     addFooter(msg, FOOTER_PATCH_SET, ps);
     if (status != null) {
       addFooter(msg, FOOTER_STATUS, status.name().toLowerCase());
@@ -348,11 +331,19 @@ public class ChangeUpdate extends VersionedMetaData {
     return true;
   }
 
+  @Override
+  protected Project.NameKey getProjectName() {
+    return getProjectName(ctl);
+  }
+
   private boolean isEmpty() {
     return approvals.isEmpty()
         && reviewers.isEmpty()
+        && commentsForBase.isEmpty()
+        && commentsForPs.isEmpty()
         && status == null
-        && submitRecords == null;
+        && submitRecords == null
+        && changeMessage == null;
   }
 
   private static StringBuilder addFooter(StringBuilder sb, FooterKey footer) {
@@ -370,10 +361,5 @@ public class ChangeUpdate extends VersionedMetaData {
 
   private static String sanitizeFooter(String value) {
     return value.replace('\n', ' ').replace('\0', ' ');
-  }
-
-  @Override
-  protected void onLoad() throws IOException, ConfigInvalidException {
-    // Do nothing; just reads current revision.
   }
 }

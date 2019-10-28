@@ -37,6 +37,7 @@ import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gson.annotations.SerializedName;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.errors.AmbiguousObjectException;
 import org.eclipse.jgit.errors.ConfigInvalidException;
@@ -51,9 +52,10 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.List;
 
+@Singleton
 class DashboardsCollection implements
     ChildCollection<ProjectResource, DashboardResource>,
-    AcceptsCreate<ProjectResource>{
+    AcceptsCreate<ProjectResource> {
   private final GitRepositoryManager gitManager;
   private final DynamicMap<RestView<DashboardResource>> views;
   private final Provider<ListDashboards> list;
@@ -203,7 +205,6 @@ class DashboardsCollection implements
   }
 
   static class DashboardInfo {
-    final String kind = "gerritcodereview#dashboard";
     String id;
     String project;
     String definingProject;

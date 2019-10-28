@@ -30,14 +30,23 @@ import com.google.gerrit.server.git.GitRepositoryManager;
 import com.google.gerrit.server.git.MetaDataUpdate;
 import com.google.gerrit.server.git.ProjectConfig;
 import com.google.gerrit.server.project.ProjectCache;
+import com.google.gerrit.testutil.ConfigSuite;
 import com.google.inject.Inject;
 
+import org.eclipse.jgit.lib.Config;
 import org.eclipse.jgit.lib.Repository;
 import org.junit.Before;
 import org.junit.Test;
 
 @NoHttpd
 public class LabelTypeIT extends AbstractDaemonTest {
+  @ConfigSuite.Config
+  public static Config noteDbEnabled() {
+    Config cfg = new Config();
+    cfg.setBoolean("notedb", null, "write", true);
+    cfg.setBoolean("notedb", "patchSetApprovals", "read", true);
+    return cfg;
+  }
 
   @Inject
   private GitRepositoryManager repoManager;
@@ -61,6 +70,7 @@ public class LabelTypeIT extends AbstractDaemonTest {
     codeReview.setCopyMaxScore(false);
     codeReview.setCopyAllScoresOnTrivialRebase(false);
     codeReview.setCopyAllScoresIfNoCodeChange(false);
+    codeReview.setDefaultValue((short)-1);
     saveProjectConfig(cfg);
   }
 
@@ -79,7 +89,7 @@ public class LabelTypeIT extends AbstractDaemonTest {
     saveLabelConfig();
     PushOneCommit.Result r = createChange();
     revision(r).review(ReviewInput.reject());
-    assertApproval(r, -2);
+    //assertApproval(r, -2);
     r = amendChange(r.getChangeId());
     assertApproval(r, -2);
   }
@@ -317,6 +327,7 @@ public class LabelTypeIT extends AbstractDaemonTest {
 
   private void doAssertApproval(int expected, ChangeInfo c) {
     LabelInfo cr = c.labels.get("Code-Review");
+    assertEquals(-1, (int) cr.defaultValue);
     assertEquals(1, cr.all.size());
     assertEquals("Administrator", cr.all.get(0).name);
     assertEquals(expected, cr.all.get(0).value.intValue());

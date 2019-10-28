@@ -69,6 +69,7 @@ public class LdapRealm implements Realm {
   private final EmailExpander emailExpander;
   private final LoadingCache<String, Optional<Account.Id>> usernameCache;
   private final Set<Account.FieldName> readOnlyAccountFields;
+  private final boolean fetchMemberOfEagerly;
   private final Config config;
 
   private final LoadingCache<String, Set<AccountGroup.UUID>> membershipCache;
@@ -88,7 +89,7 @@ public class LdapRealm implements Realm {
     this.membershipCache = membershipCache;
     this.config = config;
 
-    this.readOnlyAccountFields = new HashSet<Account.FieldName>();
+    this.readOnlyAccountFields = new HashSet<>();
 
     if (optdef(config, "accountFullName", "DEFAULT") != null) {
       readOnlyAccountFields.add(Account.FieldName.FULL_NAME);
@@ -96,6 +97,8 @@ public class LdapRealm implements Realm {
     if (optdef(config, "accountSshUserName", "DEFAULT") != null) {
       readOnlyAccountFields.add(Account.FieldName.USER_NAME);
     }
+
+    fetchMemberOfEagerly = optional(config, "fetchMemberOfEagerly", true);
   }
 
   static SearchScope scope(final Config c, final String setting) {
@@ -104,6 +107,22 @@ public class LdapRealm implements Realm {
 
   static String optional(final Config config, final String name) {
     return config.getString("ldap", null, name);
+  }
+
+  static int optional(Config config, String name, int defaultValue) {
+    return config.getInt("ldap", name, defaultValue);
+  }
+
+  static String optional(Config config, String name, String defaultValue) {
+    final String v = optional(config, name);
+    if (Strings.isNullOrEmpty(v)) {
+      return defaultValue;
+    }
+    return v;
+  }
+
+  static boolean optional(Config config, String name, boolean defaultValue) {
+    return config.getBoolean("ldap", name, defaultValue);
   }
 
   static String required(final Config config, final String name) {
@@ -174,7 +193,7 @@ public class LdapRealm implements Realm {
       return null;
     }
 
-    final Map<String, String> values = new HashMap<String, String>();
+    final Map<String, String> values = new HashMap<>();
     for (final String name : m.attributes()) {
       values.put(name, m.get(name));
     }
@@ -200,7 +219,8 @@ public class LdapRealm implements Realm {
       }
       try {
         final Helper.LdapSchema schema = helper.getSchema(ctx);
-        final LdapQuery.Result m = helper.findAccount(schema, ctx, username);
+        final LdapQuery.Result m = helper.findAccount(schema, ctx, username,
+            fetchMemberOfEagerly);
 
         if (authConfig.getAuthType() == AuthType.LDAP && !who.isSkipAuthentication()) {
           // We found the user account, but we need to verify
@@ -229,7 +249,9 @@ public class LdapRealm implements Realm {
         // in the middle of authenticating the user, its likely we will
         // need to know what access rights they have soon.
         //
-        membershipCache.put(username, helper.queryForGroups(ctx, username, m));
+        if (fetchMemberOfEagerly) {
+          membershipCache.put(username, helper.queryForGroups(ctx, username, m));
+        }
         return who;
       } finally {
         try {

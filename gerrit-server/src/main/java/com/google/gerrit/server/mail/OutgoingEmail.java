@@ -52,7 +52,7 @@ public abstract class OutgoingEmail {
   private static final String HDR_CC = "CC";
 
   protected String messageClass;
-  private final HashSet<Account.Id> rcptTo = new HashSet<Account.Id>();
+  private final HashSet<Account.Id> rcptTo = new HashSet<>();
   private final Map<String, EmailHeader> headers;
   private final Set<Address> smtpRcptTo = Sets.newHashSet();
   private Address smtpFromAddress;
@@ -66,7 +66,7 @@ public abstract class OutgoingEmail {
   protected OutgoingEmail(EmailArguments ea, String mc) {
     args = ea;
     messageClass = mc;
-    headers = new LinkedHashMap<String, EmailHeader>();
+    headers = new LinkedHashMap<>();
   }
 
   public void setFrom(final Account.Id id) {
@@ -388,8 +388,6 @@ public abstract class OutgoingEmail {
       StringWriter w = new StringWriter();
       template.merge(velocityContext, w);
       return w.toString();
-    } catch (EmailException e) {
-      throw e;
     } catch (Exception e) {
       throw new EmailException("Cannot format velocity template " + name, e);
     }

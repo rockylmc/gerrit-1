@@ -19,6 +19,9 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.gerrit.common.ChangeHooks;
+import com.google.gerrit.extensions.api.projects.ProjectInput.ConfigValue;
+import com.google.gerrit.extensions.common.InheritableBoolean;
+import com.google.gerrit.extensions.common.SubmitType;
 import com.google.gerrit.extensions.registration.DynamicMap;
 import com.google.gerrit.extensions.restapi.BadRequestException;
 import com.google.gerrit.extensions.restapi.ResourceConflictException;
@@ -27,8 +30,6 @@ import com.google.gerrit.extensions.restapi.RestModifyView;
 import com.google.gerrit.extensions.restapi.RestView;
 import com.google.gerrit.reviewdb.client.Branch;
 import com.google.gerrit.reviewdb.client.Project;
-import com.google.gerrit.reviewdb.client.Project.InheritableBoolean;
-import com.google.gerrit.reviewdb.client.Project.SubmitType;
 import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.config.AllProjectsNameProvider;
@@ -43,6 +44,7 @@ import com.google.gerrit.server.git.TransferConfig;
 import com.google.gerrit.server.project.PutConfig.Input;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.errors.RepositoryNotFoundException;
@@ -56,12 +58,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
+@Singleton
 public class PutConfig implements RestModifyView<ProjectResource, Input> {
   private static final Logger log = LoggerFactory.getLogger(PutConfig.class);
-  public static class ConfigValue {
-    public String value;
-    public List<String> values;
-  }
   public static class Input {
     public String description;
     public InheritableBoolean useContributorAgreements;
@@ -70,7 +69,7 @@ public class PutConfig implements RestModifyView<ProjectResource, Input> {
     public InheritableBoolean requireChangeId;
     public String maxObjectSizeLimit;
     public SubmitType submitType;
-    public Project.State state;
+    public com.google.gerrit.extensions.api.projects.ProjectState state;
     public Map<String, Map<String, ConfigValue>> pluginConfigValues;
   }
 
@@ -115,11 +114,16 @@ public class PutConfig implements RestModifyView<ProjectResource, Input> {
   public ConfigInfo apply(ProjectResource rsrc, Input input)
       throws ResourceNotFoundException, BadRequestException,
       ResourceConflictException {
-    Project.NameKey projectName = rsrc.getNameKey();
     if (!rsrc.getControl().isOwner()) {
-      throw new ResourceNotFoundException(projectName.get());
+      throw new ResourceNotFoundException(rsrc.getName());
     }
+    return apply(rsrc.getControl(), input);
+  }
 
+  public ConfigInfo apply(ProjectControl ctrl, Input input)
+      throws ResourceNotFoundException, BadRequestException,
+      ResourceConflictException {
+    Project.NameKey projectName = ctrl.getProject().getNameKey();
     if (input == null) {
       throw new BadRequestException("config is required");
     }
@@ -164,7 +168,7 @@ public class PutConfig implements RestModifyView<ProjectResource, Input> {
       }
 
       if (input.pluginConfigValues != null) {
-        setPluginConfigValues(rsrc.getControl().getProjectState(),
+        setPluginConfigValues(ctrl.getProjectState(),
             projectConfig, input.pluginConfigValues);
       }
 

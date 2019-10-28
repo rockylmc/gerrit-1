@@ -17,9 +17,10 @@ package com.google.gerrit.httpd.auth.ldap;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.gerrit.common.Nullable;
-import com.google.gerrit.common.PageLinks;
+import com.google.gerrit.extensions.registration.DynamicItem;
 import com.google.gerrit.httpd.CanonicalWebUrl;
 import com.google.gerrit.httpd.HtmlDomUtil;
+import com.google.gerrit.httpd.LoginUrlToken;
 import com.google.gerrit.httpd.WebSession;
 import com.google.gerrit.httpd.template.SiteHeaderFooter;
 import com.google.gerrit.server.account.AccountException;
@@ -30,7 +31,6 @@ import com.google.gerrit.server.account.AuthResult;
 import com.google.gerrit.server.auth.AuthenticationUnavailableException;
 import com.google.gwtexpui.server.CacheHeaders;
 import com.google.inject.Inject;
-import com.google.inject.Provider;
 import com.google.inject.Singleton;
 
 import org.slf4j.Logger;
@@ -54,13 +54,13 @@ class LdapLoginServlet extends HttpServlet {
       .getLogger(LdapLoginServlet.class);
 
   private final AccountManager accountManager;
-  private final Provider<WebSession> webSession;
+  private final DynamicItem<WebSession> webSession;
   private final CanonicalWebUrl urlProvider;
   private final SiteHeaderFooter headers;
 
   @Inject
   LdapLoginServlet(AccountManager accountManager,
-      Provider<WebSession> webSession,
+      DynamicItem<WebSession> webSession,
       CanonicalWebUrl urlProvider,
       SiteHeaderFooter headers) {
     this.accountManager = accountManager;
@@ -73,10 +73,7 @@ class LdapLoginServlet extends HttpServlet {
       @Nullable String errorMessage) throws IOException {
     String self = req.getRequestURI();
     String cancel = Objects.firstNonNull(urlProvider.get(req), "/");
-    String token = getToken(req);
-    if (!token.equals("/")) {
-      cancel += "#" + token;
-    }
+    cancel += LoginUrlToken.getToken(req);
 
     Document doc = headers.parse(LdapLoginServlet.class, "LoginForm.html");
     HtmlDomUtil.find(doc, "hostName").setTextContent(req.getServerName());
@@ -144,21 +141,10 @@ class LdapLoginServlet extends HttpServlet {
 
     StringBuilder dest = new StringBuilder();
     dest.append(urlProvider.get(req));
-    dest.append('#');
-    dest.append(getToken(req));
+    dest.append(LoginUrlToken.getToken(req));
 
     CacheHeaders.setNotCacheable(res);
     webSession.get().login(ares, "1".equals(remember));
     res.sendRedirect(dest.toString());
-  }
-
-  private static String getToken(final HttpServletRequest req) {
-    String token = req.getPathInfo();
-    if (token == null || token.isEmpty()) {
-      token = PageLinks.MINE;
-    } else if (!token.startsWith("/")) {
-      token = "/" + token;
-    }
-    return token;
   }
 }

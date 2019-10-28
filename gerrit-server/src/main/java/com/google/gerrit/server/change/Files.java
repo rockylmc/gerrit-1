@@ -41,6 +41,7 @@ import com.google.gerrit.server.patch.PatchListNotAvailableException;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.lib.ObjectReader;
 import org.eclipse.jgit.lib.Repository;
@@ -59,7 +60,8 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.concurrent.TimeUnit;
 
-class Files implements ChildCollection<RevisionResource, FileResource> {
+@Singleton
+public class Files implements ChildCollection<RevisionResource, FileResource> {
   private final DynamicMap<RestView<FileResource>> views;
   private final Provider<ListFiles> list;
 
@@ -85,7 +87,7 @@ class Files implements ChildCollection<RevisionResource, FileResource> {
     return new FileResource(rev, id.get());
   }
 
-  private static final class ListFiles implements RestReadView<RevisionResource> {
+  public static final class ListFiles implements RestReadView<RevisionResource> {
     private static final Logger log = LoggerFactory.getLogger(ListFiles.class);
 
     @Option(name = "--base", metaVar = "revision-id")
@@ -97,7 +99,7 @@ class Files implements ChildCollection<RevisionResource, FileResource> {
     private final Provider<ReviewDb> db;
     private final Provider<CurrentUser> self;
     private final FileInfoJson fileInfoJson;
-    private final Provider<Revisions> revisions;
+    private final Revisions revisions;
     private final GitRepositoryManager gitManager;
     private final PatchListCache patchListCache;
 
@@ -105,7 +107,7 @@ class Files implements ChildCollection<RevisionResource, FileResource> {
     ListFiles(Provider<ReviewDb> db,
         Provider<CurrentUser> self,
         FileInfoJson fileInfoJson,
-        Provider<Revisions> revisions,
+        Revisions revisions,
         GitRepositoryManager gitManager,
         PatchListCache patchListCache) {
       this.db = db;
@@ -114,6 +116,11 @@ class Files implements ChildCollection<RevisionResource, FileResource> {
       this.revisions = revisions;
       this.gitManager = gitManager;
       this.patchListCache = patchListCache;
+    }
+
+    public ListFiles setReviewed(boolean r) {
+      this.reviewed = r;
+      return this;
     }
 
     @Override
@@ -127,7 +134,7 @@ class Files implements ChildCollection<RevisionResource, FileResource> {
 
       PatchSet basePatchSet = null;
       if (base != null) {
-        RevisionResource baseResource = revisions.get().parse(
+        RevisionResource baseResource = revisions.parse(
             resource.getChangeResource(), IdString.fromDecoded(base));
         basePatchSet = baseResource.getPatchSet();
       }

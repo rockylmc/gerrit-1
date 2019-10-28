@@ -7,15 +7,72 @@ link:rest-api.html[REST API].
 [[change-endpoints]]
 == Change Endpoints
 
+[[create-change]]
+=== Create Change
+--
+'POST /changes'
+--
+
+The change info link:#change-info[ChangeInfo] entity must be provided in the
+request body. Only the following attributes are honored: `project`,
+`branch`, `subject`, `status` and `topic`. The first three attributes are
+mandatory. Valid values for status are: `DRAFT` and `NEW`.
+
+.Request
+----
+  POST /changes HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  {
+    "project" : "myProject",
+    "subject" : "Let's support 100% Gerrit workflow direct in browser",
+    "branch" : "master",
+    "topic" : "create-change-in-browser",
+    "status" : "DRAFT"
+  }
+----
+
+As response a link:#change-info[ChangeInfo] entity is returned that describes
+the resulting change.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9941",
+    "project": "myProject",
+    "branch": "master",
+    "topic": "create-change-in-browser",
+    "change_id": "I8473b95934b5732ac55d26311a706c9c2bde9941",
+    "subject": "Let's support 100% Gerrit workflow direct in browser",
+    "status": "DRAFT",
+    "created": "2014-05-05 07:15:44.639000000",
+    "updated": "2014-05-05 07:15:44.639000000",
+    "mergeable": true,
+    "insertions": 0,
+    "deletions": 0,
+    "_sortkey": "002cbc25000004e5",
+    "_number": 4711,
+    "owner": {
+      "name": "John Doe"
+    }
+  }
+----
+
 [[list-changes]]
 === Query Changes
 --
 'GET /changes/'
 --
 
-Queries changes visible to the caller. The query string must be
-provided by the `q` parameter. The `n` parameter can be used to limit
-the returned results.
+Queries changes visible to the caller. The
+link:user-search.html#_search_operators[query string] must be provided
+by the `q` parameter. The `n` parameter can be used to limit the
+returned results.
 
 As result a list of link:#change-info[ChangeInfo] entries is returned.
 The change output is sorted by the last update time, most recently
@@ -37,7 +94,6 @@ Query for open changes of watched projects:
   )]}'
   [
     {
-      "kind": "gerritcodereview#change",
       "id": "demo~master~Idaf5e098d70898b7119f6f4af5a6c13343d64b57",
       "project": "demo",
       "branch": "master",
@@ -56,7 +112,6 @@ Query for open changes of watched projects:
       },
     },
     {
-      "kind": "gerritcodereview#change",
       "id": "demo~master~I09c8041b5867d5b33170316e2abc34b79bbb8501",
       "project": "demo",
       "branch": "master",
@@ -111,7 +166,6 @@ Query that retrieves changes for a user's dashboard:
   [
     [
       {
-        "kind": "gerritcodereview#change",
         "id": "demo~master~Idaf5e098d70898b7119f6f4af5a6c13343d64b57",
         "project": "demo",
         "branch": "master",
@@ -241,6 +295,11 @@ default. Optional fields are:
   authenticated and has commented on the current revision.
 --
 
+[[patch-set-links]]
+--
+* `PATCHSET_LINKS`: include the `web_links` field.
+--
+
 .Request
 ----
   GET /changes/?q=97&o=CURRENT_REVISION&o=CURRENT_COMMIT&o=CURRENT_FILES&o=DOWNLOAD_COMMANDS HTTP/1.0
@@ -255,8 +314,7 @@ default. Optional fields are:
   )]}'
   [
     {
-      "kind": "gerritcodereview#change",
-      "id": "demo~master~I7ea46d2e2ee5c64c0d807677859cfb7d90b8966a",
+      "id": "gerrit~master~I7ea46d2e2ee5c64c0d807677859cfb7d90b8966a",
       "project": "gerrit",
       "branch": "master",
       "change_id": "I7ea46d2e2ee5c64c0d807677859cfb7d90b8966a",
@@ -392,7 +450,6 @@ describes the change.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940",
     "project": "myProject",
     "branch": "master",
@@ -433,7 +490,10 @@ default. Fields are described in link:#list-changes[Query Changes].
 ----
 
 As response a link:#change-info[ChangeInfo] entity is returned that
-describes the change.
+describes the change.  This response will contain all votes for each
+label and include one combined vote.  The combined label vote is
+calculated in the following order (from highest to lowest):
+REJECTED > APPROVED > DISLIKED > RECOMMENDED.
 
 .Response
 ----
@@ -443,7 +503,6 @@ describes the change.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940",
     "project": "myProject",
     "branch": "master",
@@ -488,12 +547,6 @@ describes the change.
         }
       },
       "Code-Review": {
-        "recommended": {
-          "_account_id": 1000097,
-          "name": "Jane Roe",
-          "email": "jane.roe@example.com",
-          "username": "jroe"
-        },
         "disliked": {
           "_account_id": 1000096,
           "name": "John Doe",
@@ -694,7 +747,6 @@ describes the abandoned change.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940",
     "project": "myProject",
     "branch": "master",
@@ -754,7 +806,6 @@ describes the restored change.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940",
     "project": "myProject",
     "branch": "master",
@@ -812,7 +863,6 @@ is included.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I3ea943139cb62e86071996f2480e58bf3eeb9dd2",
     "project": "myProject",
     "branch": "master",
@@ -905,7 +955,6 @@ describes the reverting change.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940",
     "project": "myProject",
     "branch": "master",
@@ -971,7 +1020,6 @@ describes the submitted/merged change.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940",
     "project": "myProject",
     "branch": "master",
@@ -1061,7 +1109,6 @@ an link:#included-in-info[IncludedInInfo] entity is returned.
 
   )]}'
   {
-    "kind": "gerritcodereview#includedininfo",
     "branches": [
       "master"
     ],
@@ -1119,7 +1166,6 @@ As result a list of link:#reviewer-info[ReviewerInfo] entries is returned.
   )]}'
   [
     {
-      "kind": "gerritcodereview#reviewer",
       "approvals": {
         "Verified": "+1",
         "Code-Review": "+2"
@@ -1129,7 +1175,6 @@ As result a list of link:#reviewer-info[ReviewerInfo] entries is returned.
       "email": "john.doe@example.com"
     },
     {
-      "kind": "gerritcodereview#reviewer",
       "approvals": {
         "Verified": " 0",
         "Code-Review": "-1"
@@ -1166,7 +1211,6 @@ As result a list of link:#suggested-reviewer-info[SuggestedReviewerInfo] entries
   )]}'
   [
     {
-      "kind": "gerritcodereview#suggestedreviewer",
       "account": {
         "_account_id": 1000097,
         "name": "Jane Roe",
@@ -1174,7 +1218,6 @@ As result a list of link:#suggested-reviewer-info[SuggestedReviewerInfo] entries
       }
     },
     {
-      "kind": "gerritcodereview#suggestedreviewer",
       "group": {
         "id": "4fd581c0657268f2bdcc26699fbf9ddb76e3a279",
         "name": "Joiner"
@@ -1207,7 +1250,6 @@ describes the reviewer.
 
   )]}'
   {
-    "kind": "gerritcodereview#reviewer",
     "approvals": {
       "Verified": "+1",
       "Code-Review": "+2"
@@ -1252,7 +1294,6 @@ returned that describes the newly added reviewers.
   {
     "reviewers": [
       {
-        "kind": "gerritcodereview#reviewer",
         "approvals": {
           "Verified": " 0",
           "Code-Review": " 0"
@@ -1354,7 +1395,6 @@ describes the revision.
 
   )]}'
   {
-    "kind": "gerritcodereview#commit",
     "parents": [
       {
         "commit": "1eee2c9d8f352483781e772f35dc586a69ff5646",
@@ -1409,7 +1449,6 @@ for the current patch set.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940",
     "project": "myProject",
     "branch": "master",
@@ -1514,6 +1553,79 @@ for the current patch set.
   }
 ----
 
+[[get-related-changes]]
+=== Get Related Changes
+--
+'GET /changes/link:#change-id[\{change-id\}]/revisions/link:#revision-id[\{revision-id\}]/related'
+--
+
+Retrieves related changes of a revision.  Related changes are changes that either
+depend on, or are dependencies of the revision.
+
+.Request
+----
+  GET /changes/gerrit~master~I5e4fc08ce34d33c090c9e0bf320de1b17309f774/revisions/b1cb4caa6be46d12b94c25aa68aebabcbb3f53fe/related HTTP/1.0
+----
+
+As result a link:#related-changes-info[RelatedChangesInfo] entity is returned
+describing the related changes.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "changes": [
+      {
+        "change_id": "Ic62ae3103fca2214904dbf2faf4c861b5f0ae9b5",
+        "commit": {
+          "commit": "78847477532e386f5a2185a4e8c90b2509e354e3",
+          "parents": [
+            {
+              "commit": "bb499510bbcdbc9164d96b0dbabb4aa45f59a87e"
+            }
+          ],
+          "author": {
+            "name": "David Ostrovsky",
+            "email": "david@ostrovsky.org",
+            "date": "2014-07-12 15:04:24.000000000",
+            "tz": 120
+          },
+          "subject": "Remove Solr"
+        },
+        "_change_number": 58478,
+        "_revision_number": 2,
+        "_current_revision_number": 2
+      },
+      {
+        "change_id": "I5e4fc08ce34d33c090c9e0bf320de1b17309f774",
+        "commit": {
+          "commit": "b1cb4caa6be46d12b94c25aa68aebabcbb3f53fe",
+          "parents": [
+            {
+              "commit": "d898f12a9b7a92eb37e7a80636195a1b06417aad"
+            }
+          ],
+          "author": {
+            "name": "David Pursehouse",
+            "email": "david.pursehouse@sonymobile.com",
+            "date": "2014-06-24 02:01:28.000000000",
+            "tz": 540
+          },
+          "subject": "Add support for secondary index with Elasticsearch"
+        },
+        "_change_number": 58081,
+        "_revision_number": 10,
+        "_current_revision_number": 10
+      }
+    ]
+  }
+----
+
+
 [[set-review]]
 === Set Review
 --
@@ -1601,7 +1713,6 @@ is included.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I3ea943139cb62e86071996f2480e58bf3eeb9dd2",
     "project": "myProject",
     "branch": "master",
@@ -1804,6 +1915,8 @@ an indicator if the change is currently mergeable.
   GET /changes/myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940/revisions/current/mergeable HTTP/1.0
 ----
 
+As response a link:#mergeable-info[MergeableInfo] entity is returned.
+
 .Response
 ----
   HTTP/1.1 200 OK
@@ -1814,6 +1927,37 @@ an indicator if the change is currently mergeable.
   {
     submit_type: "MERGE_IF_NECESSARY",
     mergeable: true,
+  }
+----
+
+If the `other-branches` parameter is specified, the mergeability will also be
+checked for all other branches.
+
+If the `force` parameter is specified, the mergeability against the destination
+will be rechecked, in case of prior transient failures or bugs.
+
+.Request
+----
+  GET /changes/myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940/revisions/current/mergeable?other-branches HTTP/1.0
+----
+
+The response will then contain a list of all other branches where this changes
+could merge cleanly.
+
+.Response
+----
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    submit_type: "MERGE_IF_NECESSARY",
+    mergeable: true,
+    mergeable_into: [
+        "refs/heads/stable-2.7",
+        "refs/heads/stable-2.8",
+    ]
   }
 ----
 
@@ -1941,14 +2085,12 @@ sorted by file path.
   {
     "gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java": [
       {
-        "kind": "gerritcodereview#comment",
         "id": "TvcXrmjM",
         "line": 23,
         "message": "[nit] trailing whitespace",
         "updated": "2013-02-26 15:40:43.986000000"
       },
       {
-        "kind": "gerritcodereview#comment",
         "id": "TveXwFiA",
         "line": 49,
         "in_reply_to": "TfYX-Iuo",
@@ -1993,7 +2135,6 @@ describes the draft comment.
 
   )]}'
   {
-    "kind": "gerritcodereview#comment",
     "id": "TvcXrmjM",
     "path": "gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java",
     "line": 23,
@@ -2027,7 +2168,6 @@ describes the draft comment.
 
   )]}'
   {
-    "kind": "gerritcodereview#comment",
     "id": "TvcXrmjM",
     "path": "gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java",
     "line": 23,
@@ -2070,7 +2210,6 @@ describes the draft comment.
 
   )]}'
   {
-    "kind": "gerritcodereview#comment",
     "id": "TvcXrmjM",
     "path": "gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java",
     "line": 23,
@@ -2107,7 +2246,9 @@ Lists the published comments of a revision.
 
 As result a map is returned that maps the file path to a list of
 link:#comment-info[CommentInfo] entries. The entries in the map are
-sorted by file path.
+sorted by file path and only include file (or inline) comments. Use
+the link:#get-change-detail[Get Change Detail] endpoint to retrieve
+the general change message (or comment).
 
 .Request
 ----
@@ -2124,7 +2265,6 @@ sorted by file path.
   {
     "gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java": [
       {
-        "kind": "gerritcodereview#comment",
         "id": "TvcXrmjM",
         "line": 23,
         "message": "[nit] trailing whitespace",
@@ -2136,7 +2276,6 @@ sorted by file path.
         }
       },
       {
-        "kind": "gerritcodereview#comment",
         "id": "TveXwFiA",
         "line": 49,
         "in_reply_to": "TfYX-Iuo",
@@ -2176,7 +2315,6 @@ describes the published comment.
 
   )]}'
   {
-    "kind": "gerritcodereview#comment",
     "id": "TvcXrmjM",
     "path": "gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java",
     "line": 23,
@@ -2516,7 +2654,6 @@ describes the resulting cherry picked change.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9941",
     "project": "myProject",
     "branch": "release-branch",
@@ -2568,7 +2705,6 @@ describes the change.
 
   )]}'
   {
-    "kind": "gerritcodereview#change",
     "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9941",
     "project": "myProject",
     "branch": "release-branch",
@@ -2732,7 +2868,6 @@ The `ChangeInfo` entity contains information about a change.
 [options="header",width="50%",cols="1,^1,5"]
 |==================================
 |Field Name           ||Description
-|`kind`               ||`gerritcodereview#change`
 |`id`                 ||
 The ID of the change in the format "'<project>\~<branch>~<Change-Id>'",
 where 'project', 'branch' and 'Change-Id' are URL encoded. For 'branch' the
@@ -2761,7 +2896,7 @@ Whether the change was reviewed by the calling user.
 Only set if link:#reviewed[reviewed] is requested.
 |`mergeable`          |optional|
 Whether the change is mergeable. +
-Not set for merged changes.
+Not set for merged changes, or if the change has not yet been tested.
 |`insertions`         ||
 Number of inserted lines.
 |`deletions`          ||
@@ -2807,6 +2942,37 @@ Whether the query would deliver more results if not limited. +
 Only set on either the last or the first change that is returned.
 |==================================
 
+[[related-changes-info]]
+=== RelatedChangesInfo
+The `RelatedChangesInfo` entity contains information about related
+changes.
+
+[options="header",width="50%",cols="1,6"]
+|===========================
+|Field Name                |Description
+|`changes`                 |A list of
+link:#related-change-and-commit-info[RelatedChangeAndCommitInfo] entities
+describing the related changes. Sorted by git commit order, newest to
+oldest. Empty if there are no related changes.
+|===========================
+
+[[related-change-and-commit-info]]
+=== RelatedChangeAndCommitInfo
+
+The `RelatedChangeAndCommitInfo` entity contains information about
+a related change and commit.
+
+[options="header",width="50%",cols="1,^1,5"]
+|===========================
+|Field Name                ||Description
+|`change_id`               |optional|The Change-Id of the change.
+|`commit`                  ||The commit as a
+link:#commit-info[CommitInfo] entity.
+|`_change_number`          |optional|The change number.
+|`_revision_number`        |optional|The revision number.
+|`_current_revision_number`|optional|The current revision number.
+|===========================
+
 [[change-message-info]]
 === ChangeMessageInfo
 The `ChangeMessageInfo` entity contains information about a message
@@ -2817,7 +2983,7 @@ attached to a change.
 |Field Name           ||Description
 |`id`                 ||The ID of the message.
 |`author`             |optional|
-Author of the message as an 
+Author of the message as an
 link:rest-api-accounts.html#account-info[AccountInfo] entity. +
 Unset if written by the Gerrit system.
 |`date`            ||
@@ -2835,7 +3001,7 @@ The `CherryPickInput` entity contains information for cherry-picking a change to
 |===========================
 |Field Name    |Description
 |`message`     |Commit message for the cherry-picked change
-|`destination` |Destination Branch
+|`destination` |Destination branch
 |===========================
 
 [[comment-info]]
@@ -2845,7 +3011,6 @@ The `CommentInfo` entity contains information about an inline comment.
 [options="header",width="50%",cols="1,^1,5"]
 |===========================
 |Field Name    ||Description
-|`kind`        ||`gerritcodereview#comment`
 |`id`          ||The URL encoded UUID of the comment.
 |`path`        |optional|
 The path of the file for which the inline comment was done. +
@@ -2881,8 +3046,6 @@ comment.
 [options="header",width="50%",cols="1,^1,5"]
 |===========================
 |Field Name    ||Description
-|`kind`        |optional|
-Must be `gerritcodereview#comment` if provided.
 |`id`          |optional|
 The URL encoded UUID of the comment if an existing draft comment should
 be updated.
@@ -3119,6 +3282,8 @@ If not set, the default is false.
 |`value`       |optional|The voting value of the user who
 recommended/disliked this label on the change if it is not
 "`+1`"/"`-1`".
+|`default_value`|optional|The default voting value for the label.
+This value may be outside the range specified in permitted_labels.
 |===========================
 
 ==== Fields set by `DETAILED_LABELS`
@@ -3132,6 +3297,23 @@ label. The map maps the values ("`-2`", "`-1`", " `0`", "`+1`", "`+2`")
 to the value descriptions.
 |===========================
 
+[[mergeable-info]]
+=== MergeableInfo
+The `MergeableInfo` entity contains information about the mergeability of a
+change.
+
+[options="header",width="50%",cols="1,^1,5"]
+|============================
+|Field Name      ||Description
+|`submit_type`   ||
+Submit type used for this change, can be `MERGE_IF_NECESSARY`,
+`FAST_FORWARD_ONLY`, `REBASE_IF_NECESSARY`, `MERGE_ALWAYS` or
+`CHERRY_PICK`.
+|`mergeable`     ||
+`true` if this change is cleanly mergeable, `false` otherwise
+|`mergeable_into`|optional|
+A list of other branch names where this change could merge cleanly
+|============================
 
 [[restore-input]]
 === RestoreInput
@@ -3222,7 +3404,6 @@ In addition `ReviewerInfo` has the following fields:
 [options="header",width="50%",cols="1,6"]
 |==========================
 |Field Name    |Description
-|`kind`        |`gerritcodereview#reviewer`
 |`approvals`   |
 The approvals of the reviewer as a map that maps the label names to the
 approval values ("`-2`", "`-1`", "`0`", "`+1`", "`+2`").
@@ -3274,6 +3455,9 @@ link:#file-info[FileInfo] entities.
 Actions the caller might be able to perform on this revision. The
 information is a map of view name to link:#action-info[ActionInfo]
 entities.
+|'web_links'   |optional|
+Links to the patch set in external sites as a list of
+link:#web-link-info[WebLinkInfo] entities.
 |===========================
 
 [[rule-input]]
@@ -3396,13 +3580,22 @@ change was merged into and tags it was tagged with.
 [options="header",width="50%",cols="1,6"]
 |==========================
 |Field Name |Description
-|`kind`     |`gerritcodereview#includedininfo`
 |`branches` | The list of branches this change was merged into.
 Each branch is listed without the 'refs/head/' prefix.
 |`tags`     | The list of tags this change was tagged with.
 Each tag is listed without the 'refs/tags/' prefix.
 |==========================
 
+[[web-link-info]]
+=== WebLinkInfo
+The `WebLinkInfo` entity describes a link to an external site.
+
+[options="header",width="50%",cols="1,6"]
+|======================
+|Field Name|Description
+|`name`    |The link name.
+|`url`     |The link URL.
+|======================
 
 GERRIT
 ------

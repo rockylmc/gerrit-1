@@ -24,7 +24,7 @@ import java.net.URISyntaxException;
 
 public class HttpPushForReviewIT extends AbstractPushForReview {
   @Before
-  public void selectHttpUrl() throws GitAPIException, IOException {
+  public void selectHttpUrl() throws GitAPIException, IOException, URISyntaxException {
     CredentialsProvider.setDefault(new UsernamePasswordCredentialsProvider(
         admin.username, admin.httpPassword));
     selectProtocol(Protocol.HTTP);

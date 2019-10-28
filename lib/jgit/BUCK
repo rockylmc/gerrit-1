@@ -9,9 +9,9 @@ maven_jar(
   bin_sha1 = '1dac8dd7deb4ec72939fe30cd6fd57c22fd4a403',
   src_sha1 = '6c5fe5a2bd6b12571d15984916463f2f28223a93',
   license = 'jgit',
+  repository = REPO,
   unsign = True,
   deps = [':ewah'],
-  repository = REPO,
   exclude = [
     'META-INF/eclipse.inf',
     'about.html',
@@ -24,8 +24,8 @@ maven_jar(
   id = 'org.eclipse.jgit:org.eclipse.jgit.http.server:' + VERS,
   sha1 = '6498fa4f4bd5db11d3069952540b68a9aef024c2',
   license = 'jgit',
-  deps = [':jgit'],
   repository = REPO,
+  deps = [':jgit'],
   unsign = True,
   exclude = [
     'about.html',
@@ -38,11 +38,11 @@ maven_jar(
   id = 'org.eclipse.jgit:org.eclipse.jgit.archive:' + VERS,
   sha1 = 'd64327d788ae43d79eb4e42d2432646c7b485789',
   license = 'jgit',
+  repository = REPO,
   deps = [':jgit',
     '//lib/commons:compress',
     '//lib:tukaani-xz',
   ],
-  repository = REPO,
   unsign = True,
   exclude = [
     'about.html',
@@ -55,9 +55,9 @@ maven_jar(
   id = 'org.eclipse.jgit:org.eclipse.jgit.junit:' + VERS,
   sha1 = '50c36e367e7df961c1acc9308b7d52ea21a73d91',
   license = 'DO_NOT_DISTRIBUTE',
+  repository = REPO,
   unsign = True,
   deps = [':jgit'],
-  repository = REPO,
 )
 
 maven_jar(
@@ -69,17 +69,15 @@ maven_jar(
 
 prebuilt_jar(
   name = 'Edit',
-  binary_jar = genfile('edit-src.jar'),
-  deps = [':jgit_edit_src'],
+  binary_jar = ':jgit_edit_src',
   visibility = ['PUBLIC'],
 )
 
 genrule(
   name = 'jgit_edit_src',
-  cmd = 'unzip -qd $TMP $SRCS org/eclipse/jgit/diff/Edit.java;' +
+  cmd = 'unzip -qd $TMP $(location :jgit_src) ' +
+    'org/eclipse/jgit/diff/Edit.java;' +
     'cd $TMP;' +
     'zip -Dq $OUT org/eclipse/jgit/diff/Edit.java',
-  srcs = [genfile('jgit/org.eclipse.jgit-%s-src.jar' % VERS)],
   out = 'edit-src.jar',
-  deps = [':jgit_src']
 )

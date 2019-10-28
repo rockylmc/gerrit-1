@@ -27,11 +27,13 @@ import com.google.gerrit.reviewdb.client.PatchSetInfo;
 import com.google.gerrit.reviewdb.client.RevId;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
+import com.google.gerrit.server.ChangeMessagesUtil;
 import com.google.gerrit.server.ChangeUtil;
 import com.google.gerrit.server.extensions.events.GitReferenceUpdated;
 import com.google.gerrit.server.mail.CreateChangeSender;
 import com.google.gerrit.server.notedb.ChangeUpdate;
 import com.google.gerrit.server.patch.PatchSetInfoFactory;
+import com.google.gerrit.server.project.ChangeControl;
 import com.google.gerrit.server.project.RefControl;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
@@ -45,6 +47,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 
 public class ChangeInserter {
@@ -60,6 +63,7 @@ public class ChangeInserter {
   private final GitReferenceUpdated gitRefUpdated;
   private final ChangeHooks hooks;
   private final ApprovalsUtil approvalsUtil;
+  private final ChangeMessagesUtil cmUtil;
   private final MergeabilityChecker mergeabilityChecker;
   private final CreateChangeSender.Factory createChangeSenderFactory;
 
@@ -72,17 +76,18 @@ public class ChangeInserter {
   private ChangeMessage changeMessage;
   private Set<Account.Id> reviewers;
   private Set<Account.Id> extraCC;
+  private Map<String, Short> approvals;
   private boolean runHooks;
   private boolean sendMail;
 
   @Inject
   ChangeInserter(Provider<ReviewDb> dbProvider,
       ChangeUpdate.Factory updateFactory,
-      Provider<ApprovalsUtil> approvals,
       PatchSetInfoFactory patchSetInfoFactory,
       GitReferenceUpdated gitRefUpdated,
       ChangeHooks hooks,
       ApprovalsUtil approvalsUtil,
+      ChangeMessagesUtil cmUtil,
       MergeabilityChecker mergeabilityChecker,
       CreateChangeSender.Factory createChangeSenderFactory,
       @Assisted RefControl refControl,
@@ -93,6 +98,7 @@ public class ChangeInserter {
     this.gitRefUpdated = gitRefUpdated;
     this.hooks = hooks;
     this.approvalsUtil = approvalsUtil;
+    this.cmUtil = cmUtil;
     this.mergeabilityChecker = mergeabilityChecker;
     this.createChangeSenderFactory = createChangeSenderFactory;
     this.refControl = refControl;
@@ -100,6 +106,7 @@ public class ChangeInserter {
     this.commit = commit;
     this.reviewers = Collections.emptySet();
     this.extraCC = Collections.emptySet();
+    this.approvals = Collections.emptyMap();
     this.runHooks = true;
     this.sendMail = true;
 
@@ -152,14 +159,20 @@ public class ChangeInserter {
     return patchSet;
   }
 
+  public ChangeInserter setApprovals(Map<String, Short> approvals) {
+    this.approvals = approvals;
+    return this;
+  }
+
   public PatchSetInfo getPatchSetInfo() {
     return patchSetInfo;
   }
 
   public Change insert() throws OrmException, IOException {
     ReviewDb db = dbProvider.get();
+    ChangeControl ctl = refControl.getProjectControl().controlFor(change);
     ChangeUpdate update = updateFactory.create(
-        refControl.getProjectControl().controlFor(change),
+        ctl,
         change.getCreatedOn());
     db.changes().beginTransaction(change.getId());
     try {
@@ -169,25 +182,23 @@ public class ChangeInserter {
       LabelTypes labelTypes = refControl.getProjectControl().getLabelTypes();
       approvalsUtil.addReviewers(db, update, labelTypes, change,
           patchSet, patchSetInfo, reviewers, Collections.<Account.Id> emptySet());
+      approvalsUtil.addApprovals(db, update, labelTypes, patchSet, patchSetInfo,
+          change, ctl, approvals);
       if (messageIsForChange()) {
-        insertMessage(db);
+        cmUtil.addChangeMessage(db, update, changeMessage);
       }
       db.commit();
     } finally {
       db.rollback();
     }
-
     update.commit();
     CheckedFuture<?, IOException> f = mergeabilityChecker.newCheck()
         .addChange(change)
         .reindex()
         .runAsync();
-    if (!messageIsForChange()) {
-      insertMessage(db);
-      if (changeMessage != null) {
-        ChangeUtil.bumpRowVersionNotLastUpdatedOn(
-            changeMessage.getKey().getParentKey(), db);
-      }
+
+    if(!messageIsForChange()) {
+      commitMessageNotForChange();
     }
 
     if (sendMail) {
@@ -215,6 +226,23 @@ public class ChangeInserter {
     return change;
   }
 
+  private void commitMessageNotForChange() throws OrmException,
+      IOException {
+    ReviewDb db = dbProvider.get();
+    if (changeMessage != null) {
+      Change otherChange =
+          db.changes().get(changeMessage.getPatchSetId().getParentKey());
+      ChangeUtil.bumpRowVersionNotLastUpdatedOn(
+          changeMessage.getKey().getParentKey(), db);
+      ChangeControl otherControl =
+          refControl.getProjectControl().controlFor(otherChange);
+      ChangeUpdate updateForOtherChange =
+          updateFactory.create(otherControl, change.getLastUpdatedOn());
+      cmUtil.addChangeMessage(db, updateForOtherChange, changeMessage);
+      updateForOtherChange.commit();
+    }
+  }
+
   private boolean messageIsForChange() {
     if (changeMessage == null) {
       return false;
@@ -222,11 +250,5 @@ public class ChangeInserter {
     Change.Id id = change.getId();
     Change.Id msgId = changeMessage.getKey().getParentKey();
     return msgId.equals(id);
-  }
-
-  private void insertMessage(ReviewDb db) throws OrmException {
-    if (changeMessage != null) {
-      db.changeMessages().insert(Collections.singleton(changeMessage));
-    }
   }
 }

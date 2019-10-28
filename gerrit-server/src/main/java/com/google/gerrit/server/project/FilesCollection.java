@@ -21,7 +21,9 @@ import com.google.gerrit.extensions.restapi.ResourceNotFoundException;
 import com.google.gerrit.extensions.restapi.RestView;
 import com.google.gerrit.server.project.BranchResource;
 import com.google.inject.Inject;
+import com.google.inject.Singleton;
 
+@Singleton
 public class FilesCollection implements
     ChildCollection<BranchResource, FileResource> {
   private final DynamicMap<RestView<FileResource>> views;
@@ -38,7 +40,7 @@ public class FilesCollection implements
 
   @Override
   public FileResource parse(BranchResource parent, IdString id) {
-    return new FileResource(parent, id.get());
+    return new FileResource(parent.getNameKey(), parent.getRef(), id.get());
   }
 
   @Override

@@ -78,7 +78,7 @@ public class DynamicItem<T> {
     Key<DynamicItem<T>> key = (Key<DynamicItem<T>>) Key.get(
         Types.newParameterizedType(DynamicItem.class, member.getType()));
     binder.bind(key)
-      .toProvider(new DynamicItemProvider<T>(member, key))
+      .toProvider(new DynamicItemProvider<>(member, key))
       .in(Scopes.SINGLETON);
   }
 
@@ -111,10 +111,10 @@ public class DynamicItem<T> {
   DynamicItem(Key<DynamicItem<T>> key, Provider<T> provider, String pluginName) {
     NamedProvider<T> in = null;
     if (provider != null) {
-      in = new NamedProvider<T>(provider, pluginName);
+      in = new NamedProvider<>(provider, pluginName);
     }
     this.key = key;
-    this.ref = new AtomicReference<NamedProvider<T>>(in);
+    this.ref = new AtomicReference<>(in);
   }
 
   /**
@@ -148,19 +148,22 @@ public class DynamicItem<T> {
    * @return handle to remove the item at a later point in time.
    */
   public RegistrationHandle set(Provider<T> impl, String pluginName) {
-    final NamedProvider<T> item = new NamedProvider<T>(impl, pluginName);
-    while (!ref.compareAndSet(null, item)) {
-      NamedProvider<T> old = ref.get();
-      if (old != null) {
+    final NamedProvider<T> item = new NamedProvider<>(impl, pluginName);
+    NamedProvider<T> old = null;
+    while (!ref.compareAndSet(old, item)) {
+      old = ref.get();
+      if (old != null && !"gerrit".equals(old.pluginName)) {
         throw new ProvisionException(String.format(
             "%s already provided by %s, ignoring plugin %s",
             key.getTypeLiteral(), old.pluginName, pluginName));
       }
     }
+
+    final NamedProvider<T> defaultItem = old;
     return new RegistrationHandle() {
       @Override
       public void remove() {
-        ref.compareAndSet(item, null);
+        ref.compareAndSet(item, defaultItem);
       }
     };
   }
@@ -177,25 +180,34 @@ public class DynamicItem<T> {
    */
   public ReloadableRegistrationHandle<T> set(Key<T> key, Provider<T> impl,
       String pluginName) {
-    final NamedProvider<T> item = new NamedProvider<T>(impl, pluginName);
-    while (!ref.compareAndSet(null, item)) {
-      NamedProvider<T> old = ref.get();
-      if (old != null) {
+    final NamedProvider<T> item = new NamedProvider<>(impl, pluginName);
+    NamedProvider<T> old = null;
+    while (!ref.compareAndSet(old, item)) {
+      old = ref.get();
+      if (old != null
+          && !"gerrit".equals(old.pluginName)
+          && !pluginName.equals(old.pluginName)) {
+        // We allow to replace:
+        // 1. Gerrit core items, e.g. websession cache
+        //    can be replaced by plugin implementation
+        // 2. Reload of current plugin
         throw new ProvisionException(String.format(
             "%s already provided by %s, ignoring plugin %s",
             this.key.getTypeLiteral(), old.pluginName, pluginName));
       }
     }
-    return new ReloadableHandle(key, item);
+    return new ReloadableHandle(key, item, old);
   }
 
   private class ReloadableHandle implements ReloadableRegistrationHandle<T> {
     private final Key<T> key;
     private final NamedProvider<T> item;
+    private final NamedProvider<T> defaultItem;
 
-    ReloadableHandle(Key<T> key, NamedProvider<T> item) {
+    ReloadableHandle(Key<T> key, NamedProvider<T> item, NamedProvider<T> defaultItem) {
       this.key = key;
       this.item = item;
+      this.defaultItem = defaultItem;
     }
 
     @Override
@@ -205,14 +217,14 @@ public class DynamicItem<T> {
 
     @Override
     public void remove() {
-      ref.compareAndSet(item, null);
+      ref.compareAndSet(item, defaultItem);
     }
 
     @Override
     public ReloadableHandle replace(Key<T> newKey, Provider<T> newItem) {
-      NamedProvider<T> n = new NamedProvider<T>(newItem, item.pluginName);
+      NamedProvider<T> n = new NamedProvider<>(newItem, item.pluginName);
       if (ref.compareAndSet(item, n)) {
-        return new ReloadableHandle(newKey, n);
+        return new ReloadableHandle(newKey, n, defaultItem);
       }
       return null;
     }

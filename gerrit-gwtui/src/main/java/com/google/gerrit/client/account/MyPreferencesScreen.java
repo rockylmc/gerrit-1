@@ -19,12 +19,17 @@ import static com.google.gerrit.reviewdb.client.AccountGeneralPreferences.PAGESI
 
 import com.google.gerrit.client.Dispatcher;
 import com.google.gerrit.client.Gerrit;
+import com.google.gerrit.client.StringListPanel;
+import com.google.gerrit.client.config.ConfigServerApi;
+import com.google.gerrit.client.extensions.TopMenuItem;
 import com.google.gerrit.client.rpc.GerritCallback;
+import com.google.gerrit.client.rpc.Natives;
 import com.google.gerrit.client.rpc.ScreenLoadCallback;
 import com.google.gerrit.client.ui.OnEditEnabler;
-import com.google.gerrit.reviewdb.client.Account;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences;
 import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.CommentVisibilityStrategy;
+import com.google.gerrit.reviewdb.client.AccountGeneralPreferences.ReviewCategoryStrategy;
+import com.google.gwt.core.client.JsArray;
 import com.google.gwt.event.dom.client.ClickEvent;
 import com.google.gwt.event.dom.client.ClickHandler;
 import com.google.gwt.i18n.client.DateTimeFormat;
@@ -34,24 +39,28 @@ import com.google.gwt.user.client.ui.CheckBox;
 import com.google.gwt.user.client.ui.FlowPanel;
 import com.google.gwt.user.client.ui.Grid;
 import com.google.gwt.user.client.ui.ListBox;
-import com.google.gwtjsonrpc.common.VoidResult;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.List;
 
 public class MyPreferencesScreen extends SettingsScreen {
   private CheckBox showSiteHeader;
   private CheckBox useFlashClipboard;
   private CheckBox copySelfOnEmails;
   private CheckBox reversePatchSetOrder;
-  private CheckBox showUsernameInReviewCategory;
   private CheckBox relativeDateInChangeTable;
   private CheckBox sizeBarInChangeTable;
+  private CheckBox legacycidInChangeTable;
   private ListBox maximumPageSize;
   private ListBox dateFormat;
   private ListBox timeFormat;
+  private ListBox reviewCategoryStrategy;
   private ListBox commentVisibilityStrategy;
   private ListBox changeScreen;
   private ListBox diffView;
+  private StringListPanel myMenus;
   private Button save;
 
   @Override
@@ -62,11 +71,27 @@ public class MyPreferencesScreen extends SettingsScreen {
     useFlashClipboard = new CheckBox(Util.C.useFlashClipboard());
     copySelfOnEmails = new CheckBox(Util.C.copySelfOnEmails());
     reversePatchSetOrder = new CheckBox(Util.C.reversePatchSetOrder());
-    showUsernameInReviewCategory = new CheckBox(Util.C.showUsernameInReviewCategory());
     maximumPageSize = new ListBox();
     for (final short v : PAGESIZE_CHOICES) {
       maximumPageSize.addItem(Util.M.rowsPerPage(v), String.valueOf(v));
     }
+
+    reviewCategoryStrategy = new ListBox();
+    reviewCategoryStrategy.addItem(
+        Util.C.messageShowInReviewCategoryNone(),
+        AccountGeneralPreferences.ReviewCategoryStrategy.NONE.name());
+    reviewCategoryStrategy.addItem(
+        Util.C.messageShowInReviewCategoryName(),
+        AccountGeneralPreferences.ReviewCategoryStrategy.NAME.name());
+    reviewCategoryStrategy.addItem(
+        Util.C.messageShowInReviewCategoryEmail(),
+        AccountGeneralPreferences.ReviewCategoryStrategy.EMAIL.name());
+    reviewCategoryStrategy.addItem(
+        Util.C.messageShowInReviewCategoryUsername(),
+        AccountGeneralPreferences.ReviewCategoryStrategy.USERNAME.name());
+    reviewCategoryStrategy.addItem(
+        Util.C.messageShowInReviewCategoryAbbrev(),
+        AccountGeneralPreferences.ReviewCategoryStrategy.ABBREV.name());
 
     commentVisibilityStrategy = new ListBox();
     commentVisibilityStrategy.addItem(
@@ -138,8 +163,9 @@ public class MyPreferencesScreen extends SettingsScreen {
 
     relativeDateInChangeTable = new CheckBox(Util.C.showRelativeDateInChangeTable());
     sizeBarInChangeTable = new CheckBox(Util.C.showSizeBarInChangeTable());
+    legacycidInChangeTable = new CheckBox(Util.C.showLegacycidInChangeTable());
 
-    final Grid formGrid = new Grid(12, 2);
+    final Grid formGrid = new Grid(13, 2);
 
     int row = 0;
     formGrid.setText(row, labelIdx, "");
@@ -158,8 +184,8 @@ public class MyPreferencesScreen extends SettingsScreen {
     formGrid.setWidget(row, fieldIdx, reversePatchSetOrder);
     row++;
 
-    formGrid.setText(row, labelIdx, "");
-    formGrid.setWidget(row, fieldIdx, showUsernameInReviewCategory);
+    formGrid.setText(row, labelIdx, Util.C.reviewCategoryLabel());
+    formGrid.setWidget(row, fieldIdx, reviewCategoryStrategy);
     row++;
 
     formGrid.setText(row, labelIdx, Util.C.maximumPageSizeFieldLabel());
@@ -177,6 +203,10 @@ public class MyPreferencesScreen extends SettingsScreen {
 
       formGrid.setText(row, labelIdx, "");
       formGrid.setWidget(row, fieldIdx, sizeBarInChangeTable);
+      row++;
+
+      formGrid.setText(row, labelIdx, "");
+      formGrid.setWidget(row, fieldIdx, legacycidInChangeTable);
       row++;
     }
 
@@ -202,6 +232,10 @@ public class MyPreferencesScreen extends SettingsScreen {
         doSave();
       }
     });
+
+    myMenus = new MyMenuPanel(save);
+    add(myMenus);
+
     add(save);
 
     final OnEditEnabler e = new OnEditEnabler(save);
@@ -209,12 +243,13 @@ public class MyPreferencesScreen extends SettingsScreen {
     e.listenTo(useFlashClipboard);
     e.listenTo(copySelfOnEmails);
     e.listenTo(reversePatchSetOrder);
-    e.listenTo(showUsernameInReviewCategory);
     e.listenTo(maximumPageSize);
     e.listenTo(dateFormat);
     e.listenTo(timeFormat);
     e.listenTo(relativeDateInChangeTable);
     e.listenTo(sizeBarInChangeTable);
+    e.listenTo(legacycidInChangeTable);
+    e.listenTo(reviewCategoryStrategy);
     e.listenTo(commentVisibilityStrategy);
     e.listenTo(changeScreen);
     e.listenTo(diffView);
@@ -223,9 +258,11 @@ public class MyPreferencesScreen extends SettingsScreen {
   @Override
   protected void onLoad() {
     super.onLoad();
-    Util.ACCOUNT_SVC.myAccount(new ScreenLoadCallback<Account>(this) {
-      public void preDisplay(final Account result) {
-        display(result.getGeneralPreferences());
+    AccountApi.self().view("preferences")
+        .get(new ScreenLoadCallback<Preferences>(this) {
+      @Override
+      public void preDisplay(Preferences prefs) {
+        display(prefs);
       }
     });
   }
@@ -235,39 +272,52 @@ public class MyPreferencesScreen extends SettingsScreen {
     useFlashClipboard.setEnabled(on);
     copySelfOnEmails.setEnabled(on);
     reversePatchSetOrder.setEnabled(on);
-    showUsernameInReviewCategory.setEnabled(on);
     maximumPageSize.setEnabled(on);
     dateFormat.setEnabled(on);
     timeFormat.setEnabled(on);
     relativeDateInChangeTable.setEnabled(on);
     sizeBarInChangeTable.setEnabled(on);
+    legacycidInChangeTable.setEnabled(on);
+    reviewCategoryStrategy.setEnabled(on);
     commentVisibilityStrategy.setEnabled(on);
     changeScreen.setEnabled(on);
     diffView.setEnabled(on);
   }
 
-  private void display(final AccountGeneralPreferences p) {
-    showSiteHeader.setValue(p.isShowSiteHeader());
-    useFlashClipboard.setValue(p.isUseFlashClipboard());
-    copySelfOnEmails.setValue(p.isCopySelfOnEmails());
-    reversePatchSetOrder.setValue(p.isReversePatchSetOrder());
-    showUsernameInReviewCategory.setValue(p.isShowUsernameInReviewCategory());
-    setListBox(maximumPageSize, DEFAULT_PAGESIZE, p.getMaximumPageSize());
+  private void display(Preferences p) {
+    showSiteHeader.setValue(p.showSiteHeader());
+    useFlashClipboard.setValue(p.useFlashClipboard());
+    copySelfOnEmails.setValue(p.copySelfOnEmail());
+    reversePatchSetOrder.setValue(p.reversePatchSetOrder());
+    setListBox(maximumPageSize, DEFAULT_PAGESIZE, p.changesPerPage());
     setListBox(dateFormat, AccountGeneralPreferences.DateFormat.STD, //
-        p.getDateFormat());
+        p.dateFormat());
     setListBox(timeFormat, AccountGeneralPreferences.TimeFormat.HHMM_12, //
-        p.getTimeFormat());
-    relativeDateInChangeTable.setValue(p.isRelativeDateInChangeTable());
-    sizeBarInChangeTable.setValue(p.isSizeBarInChangeTable());
+        p.timeFormat());
+    relativeDateInChangeTable.setValue(p.relativeDateInChangeTable());
+    sizeBarInChangeTable.setValue(p.sizeBarInChangeTable());
+    legacycidInChangeTable.setValue(p.legacycidInChangeTable());
+    setListBox(reviewCategoryStrategy,
+        AccountGeneralPreferences.ReviewCategoryStrategy.NONE,
+        p.reviewCategoryStrategy());
     setListBox(commentVisibilityStrategy,
         AccountGeneralPreferences.CommentVisibilityStrategy.EXPAND_RECENT,
-        p.getCommentVisibilityStrategy());
+        p.commentVisibilityStrategy());
     setListBox(changeScreen,
         null,
-        p.getChangeScreen());
+        p.changeScreen());
     setListBox(diffView,
         AccountGeneralPreferences.DiffView.SIDE_BY_SIDE,
-        p.getDiffView());
+        p.diffView());
+    display(p.my());
+  }
+
+  private void display(JsArray<TopMenuItem> items) {
+    List<List<String>> values = new ArrayList<>();
+    for (TopMenuItem item : Natives.asList(items)) {
+      values.add(Arrays.asList(item.getName(), item.getUrl()));
+    }
+    myMenus.display(values);
   }
 
   private void setListBox(final ListBox f, final short defaultValue,
@@ -327,7 +377,6 @@ public class MyPreferencesScreen extends SettingsScreen {
     p.setUseFlashClipboard(useFlashClipboard.getValue());
     p.setCopySelfOnEmails(copySelfOnEmails.getValue());
     p.setReversePatchSetOrder(reversePatchSetOrder.getValue());
-    p.setShowUsernameInReviewCategory(showUsernameInReviewCategory.getValue());
     p.setMaximumPageSize(getListBox(maximumPageSize, DEFAULT_PAGESIZE));
     p.setDateFormat(getListBox(dateFormat,
         AccountGeneralPreferences.DateFormat.STD,
@@ -337,6 +386,10 @@ public class MyPreferencesScreen extends SettingsScreen {
         AccountGeneralPreferences.TimeFormat.values()));
     p.setRelativeDateInChangeTable(relativeDateInChangeTable.getValue());
     p.setSizeBarInChangeTable(sizeBarInChangeTable.getValue());
+    p.setLegacycidInChangeTable(legacycidInChangeTable.getValue());
+    p.setReviewCategoryStrategy(getListBox(reviewCategoryStrategy,
+        ReviewCategoryStrategy.NONE,
+        ReviewCategoryStrategy.values()));
     p.setCommentVisibilityStrategy(getListBox(commentVisibilityStrategy,
         CommentVisibilityStrategy.EXPAND_RECENT,
         CommentVisibilityStrategy.values()));
@@ -350,22 +403,30 @@ public class MyPreferencesScreen extends SettingsScreen {
     enable(false);
     save.setEnabled(false);
 
-    Util.ACCOUNT_SVC.changePreferences(p, new GerritCallback<VoidResult>() {
-      @Override
-      public void onSuccess(final VoidResult result) {
-        Gerrit.getUserAccount().setGeneralPreferences(p);
-        Gerrit.applyUserPreferences();
-        Dispatcher.changeScreen2 = false;
-        enable(true);
-      }
+    List<TopMenuItem> items = new ArrayList<>();
+    for (List<String> v : myMenus.getValues()) {
+      items.add(TopMenuItem.create(v.get(0), v.get(1)));
+    }
 
-      @Override
-      public void onFailure(final Throwable caught) {
-        enable(true);
-        save.setEnabled(true);
-        super.onFailure(caught);
-      }
-    });
+    AccountApi.self().view("preferences")
+        .post(Preferences.create(p, items), new GerritCallback<Preferences>() {
+          @Override
+          public void onSuccess(Preferences prefs) {
+            Gerrit.getUserAccount().setGeneralPreferences(p);
+            Gerrit.applyUserPreferences();
+            Dispatcher.changeScreen2 = false;
+            enable(true);
+            display(prefs);
+            Gerrit.refreshMenuBar();
+          }
+
+          @Override
+          public void onFailure(Throwable caught) {
+            enable(true);
+            save.setEnabled(true);
+            super.onFailure(caught);
+          }
+        });
   }
 
   private static String getLabel(AccountGeneralPreferences.ChangeScreen ui) {
@@ -379,6 +440,30 @@ public class MyPreferencesScreen extends SettingsScreen {
         return Util.C.changeScreenNewUi();
       default:
         return ui.name();
+    }
+  }
+
+  private class MyMenuPanel extends StringListPanel {
+    MyMenuPanel(Button save) {
+      super(Util.C.myMenu(), Arrays.asList(Util.C.myMenuName(),
+          Util.C.myMenuUrl()), save, false);
+
+      setInfo(Util.C.myMenuInfo());
+
+      Button resetButton = new Button(Util.C.myMenuReset());
+      resetButton.addClickHandler(new ClickHandler() {
+        @Override
+        public void onClick(ClickEvent event) {
+          ConfigServerApi.defaultPreferences(new GerritCallback<Preferences>() {
+            @Override
+            public void onSuccess(Preferences p) {
+              MyPreferencesScreen.this.display(p.my());
+              widget.setEnabled(true);
+            }
+          });
+        }
+      });
+      buttonPanel.add(resetButton);
     }
   }
 }

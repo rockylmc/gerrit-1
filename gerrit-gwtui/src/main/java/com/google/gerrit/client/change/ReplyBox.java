@@ -189,7 +189,16 @@ class ReplyBox extends Composite {
 
   @UiHandler("post")
   void onPost(ClickEvent e) {
-    in.message(getMessage());
+    postReview();
+  }
+
+  void quickApprove(ReviewInput quickApproveInput) {
+    in.mergeLabels(quickApproveInput);
+    postReview();
+  }
+
+  private void postReview() {
+    in.message(message.getText().trim());
     in.prePost();
     ChangeApi.revision(psId.getParentKey().get(), revision)
       .view("review")
@@ -204,12 +213,9 @@ class ReplyBox extends Composite {
     hide();
   }
 
-  String getMessage() {
-    return message.getText().trim();
-  }
-
   @UiHandler("cancel")
   void onCancel(ClickEvent e) {
+    message.setText("");
     hide();
   }
 
@@ -306,10 +312,23 @@ class ReplyBox extends Composite {
     }
   }
 
+  private Short normalizeDefaultValue(Short defaultValue, Set<Short> permittedValues) {
+    Short pmin = Collections.min(permittedValues);
+    Short pmax = Collections.max(permittedValues);
+    Short dv = defaultValue;
+    if (dv > pmax) {
+      dv = pmax;
+    } else if (dv < pmin) {
+      dv = pmin;
+    }
+    return dv;
+  }
+
   private void renderRadio(int row,
       List<Short> columns,
       LabelAndValues lv) {
     String id = lv.info.name();
+    Short dv = normalizeDefaultValue(lv.info.defaultValue(), lv.permitted);
 
     labelHelpColumn = 1 + columns.size();
     labelsTable.setText(row, 0, id);
@@ -329,9 +348,10 @@ class ReplyBox extends Composite {
       if (lv.permitted.contains(v)) {
         String text = lv.info.value_text(LabelValue.formatValue(v));
         LabelRadioButton b = new LabelRadioButton(group, text, v);
-        if ((self != null && v == self.value()) || (self == null && v == 0)) {
+        if ((self != null && v == self.value()) || (self == null && v.equals(dv))) {
           b.setValue(true);
           group.select(b);
+          in.label(group.label, v);
           labelsTable.setText(row, labelHelpColumn, b.text);
         }
         group.buttons.add(b);
@@ -445,7 +465,7 @@ class ReplyBox extends Composite {
 
     void select(LabelRadioButton b) {
       selected = b;
-      labelsTable.setText(row, labelHelpColumn, b.value != 0 ? b.text : "");
+      labelsTable.setText(row, labelHelpColumn, b.text);
     }
 
     void selectMax() {
@@ -502,7 +522,7 @@ class ReplyBox extends Composite {
     @Override
     public void onMouseOut(MouseOutEvent event) {
       LabelRadioButton b = group.selected;
-      String s = b != null && b.value != 0 ? b.text : "";
+      String s = b != null ? b.text : "";
       labelsTable.setText(group.row, labelHelpColumn, s);
     }
   }

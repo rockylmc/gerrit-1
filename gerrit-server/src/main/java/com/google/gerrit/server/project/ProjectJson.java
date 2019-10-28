@@ -15,20 +15,29 @@
 package com.google.gerrit.server.project;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.Lists;
+import com.google.gerrit.extensions.common.ProjectInfo;
+import com.google.gerrit.extensions.common.WebLinkInfo;
 import com.google.gerrit.extensions.restapi.Url;
 import com.google.gerrit.reviewdb.client.Project;
+import com.google.gerrit.server.WebLinks;
 import com.google.gerrit.server.config.AllProjectsName;
+import com.google.gerrit.server.config.AllProjectsNameProvider;
 import com.google.inject.Inject;
+import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
-import java.util.Map;
-
+@Singleton
 public class ProjectJson {
 
   private final AllProjectsName allProjects;
+  private final Provider<WebLinks> webLinks;
 
   @Inject
-  ProjectJson(AllProjectsName allProjects) {
-    this.allProjects = allProjects;
+  ProjectJson(AllProjectsNameProvider allProjectsNameProvider,
+      Provider<WebLinks> webLinks) {
+    this.allProjects = allProjectsNameProvider.get();
+    this.webLinks = webLinks;
   }
 
   public ProjectInfo format(ProjectResource rsrc) {
@@ -42,21 +51,15 @@ public class ProjectJson {
     info.parent = parentName != null ? parentName.get() : null;
     info.description = Strings.emptyToNull(p.getDescription());
     info.state = p.getState();
-    info.finish();
-    return info;
-  }
+    info.id = Url.encode(info.name);
 
-  public static class ProjectInfo {
-    public final String kind = "gerritcodereview#project";
-    public String id;
-    public String name;
-    public String parent;
-    public String description;
-    public Project.State state;
-    public Map<String, String> branches;
-
-    void finish() {
-      id = Url.encode(name);
+    info.webLinks = Lists.newArrayList();
+    for (WebLinkInfo link : webLinks.get().getProjectLinks(p.getName())) {
+      if (!Strings.isNullOrEmpty(link.name) && !Strings.isNullOrEmpty(link.url)) {
+        info.webLinks.add(link);
+      }
     }
+
+    return info;
   }
 }

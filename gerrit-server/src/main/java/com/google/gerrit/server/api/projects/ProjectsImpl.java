@@ -14,31 +14,64 @@
 
 package com.google.gerrit.server.api.projects;
 
+import com.google.common.collect.ImmutableList;
 import com.google.gerrit.extensions.api.projects.ProjectApi;
 import com.google.gerrit.extensions.api.projects.Projects;
+import com.google.gerrit.extensions.common.ProjectInfo;
 import com.google.gerrit.extensions.restapi.RestApiException;
 import com.google.gerrit.extensions.restapi.UnprocessableEntityException;
+import com.google.gerrit.server.project.ListProjects;
 import com.google.gerrit.server.project.ProjectsCollection;
 import com.google.inject.Inject;
+import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import java.io.IOException;
+import java.util.List;
 
-class ProjectsImpl implements Projects {
+@Singleton
+class ProjectsImpl extends Projects.NotImplemented implements Projects {
   private final ProjectsCollection projects;
   private final ProjectApiImpl.Factory api;
+  private final Provider<ListProjects> listProvider;
 
   @Inject
-  ProjectsImpl(ProjectsCollection projects, ProjectApiImpl.Factory api) {
+  ProjectsImpl(ProjectsCollection projects,
+      ProjectApiImpl.Factory api,
+      Provider<ListProjects> listProvider) {
     this.projects = projects;
     this.api = api;
+    this.listProvider = listProvider;
   }
 
   @Override
   public ProjectApi name(String name) throws RestApiException {
     try {
       return api.create(projects.parse(name));
-    } catch (IOException | UnprocessableEntityException e) {
+    } catch (UnprocessableEntityException e) {
+      return api.create(name);
+    } catch (IOException e) {
       throw new RestApiException("Cannot retrieve project");
     }
+  }
+
+  @Override
+  public ListRequest list() {
+    return new ListRequest() {
+      @Override
+      public List<ProjectInfo> get() throws RestApiException {
+        return list(this);
+      }
+    };
+  }
+
+  private List<ProjectInfo> list(ListRequest request) throws RestApiException {
+    ListProjects lp = listProvider.get();
+    lp.setShowDescription(request.getDescription());
+    lp.setLimit(request.getLimit());
+    lp.setStart(request.getStart());
+    lp.setMatchPrefix(request.getPrefix());
+
+    return ImmutableList.copyOf(lp.apply().values());
   }
 }

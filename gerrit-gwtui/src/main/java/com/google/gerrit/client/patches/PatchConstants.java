@@ -49,9 +49,12 @@ public interface PatchConstants extends Constants {
   String chunkNext2();
   String commentPrev();
   String commentNext();
+  String focusSideA();
+  String focusSideB();
   String fileList();
   String expandComment();
   String expandAllCommentsOnCurrentLine();
+  String toggleSideA();
   String toggleIntraline();
   String showPreferences();
 

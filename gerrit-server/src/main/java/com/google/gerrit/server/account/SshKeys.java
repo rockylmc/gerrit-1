@@ -26,17 +26,19 @@ import com.google.gerrit.server.IdentifiedUser;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
+@Singleton
 public class SshKeys implements
     ChildCollection<AccountResource, AccountResource.SshKey> {
   private final DynamicMap<RestView<AccountResource.SshKey>> views;
-  private final Provider<GetSshKeys> list;
+  private final GetSshKeys list;
   private final Provider<CurrentUser> self;
   private final Provider<ReviewDb> dbProvider;
 
   @Inject
   SshKeys(DynamicMap<RestView<AccountResource.SshKey>> views,
-      Provider<GetSshKeys> list, Provider<CurrentUser> self,
+      GetSshKeys list, Provider<CurrentUser> self,
       Provider<ReviewDb> dbProvider) {
     this.views = views;
     this.list = list;
@@ -46,7 +48,7 @@ public class SshKeys implements
 
   @Override
   public RestView<AccountResource> list() {
-    return list.get();
+    return list;
   }
 
   @Override

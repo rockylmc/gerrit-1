@@ -56,7 +56,7 @@ public class CherryPick extends SubmitStrategy {
 
     this.patchSetInfoFactory = patchSetInfoFactory;
     this.gitRefUpdated = gitRefUpdated;
-    this.newCommits = new HashMap<Change.Id, CodeReviewCommit>();
+    this.newCommits = new HashMap<>();
   }
 
   @Override
@@ -138,15 +138,16 @@ public class CherryPick extends SubmitStrategy {
     final PatchSetApproval submitAudit = args.mergeUtil.getSubmitter(n);
 
     IdentifiedUser cherryPickUser;
+    PersonIdent serverNow = args.serverIdent.get();
     PersonIdent cherryPickCommitterIdent;
     if (submitAudit != null) {
       cherryPickUser =
           args.identifiedUserFactory.create(submitAudit.getAccountId());
       cherryPickCommitterIdent = cherryPickUser.newCommitterIdent(
-          submitAudit.getGranted(), args.serverIdent.get().getTimeZone());
+          serverNow.getWhen(), serverNow.getTimeZone());
     } else {
       cherryPickUser = args.identifiedUserFactory.create(n.change().getOwner());
-      cherryPickCommitterIdent = args.serverIdent.get();
+      cherryPickCommitterIdent = serverNow;
     }
 
     final String cherryPickCmtMsg = args.mergeUtil.createCherryPickCommitMessage(n);
@@ -179,7 +180,7 @@ public class CherryPick extends SubmitStrategy {
 
       final List<PatchSetApproval> approvals = Lists.newArrayList();
       for (PatchSetApproval a
-          : args.approvalsUtil.byPatchSet(args.db, n.notes(), n.getPatchsetId())) {
+          : args.approvalsUtil.byPatchSet(args.db, n.getControl(), n.getPatchsetId())) {
         approvals.add(new PatchSetApproval(ps.getId(), a));
       }
       args.db.patchSetApprovals().insert(approvals);
@@ -212,7 +213,7 @@ public class CherryPick extends SubmitStrategy {
   private static void insertAncestors(ReviewDb db, PatchSet.Id id, RevCommit src)
       throws OrmException {
     final int cnt = src.getParentCount();
-    List<PatchSetAncestor> toInsert = new ArrayList<PatchSetAncestor>(cnt);
+    List<PatchSetAncestor> toInsert = new ArrayList<>(cnt);
     for (int p = 0; p < cnt; p++) {
       PatchSetAncestor a;
 

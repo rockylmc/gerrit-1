@@ -22,7 +22,7 @@ import com.google.gerrit.common.data.PermissionRange;
 import com.google.gerrit.common.data.PermissionRule;
 import com.google.gerrit.common.data.RefConfigSection;
 import com.google.gerrit.common.errors.InvalidNameException;
-import com.google.gerrit.reviewdb.client.Project;
+import com.google.gerrit.extensions.api.projects.ProjectState;
 import com.google.gerrit.reviewdb.client.RefNames;
 import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
@@ -68,7 +68,7 @@ public class RefControl {
     this.projectControl = projectControl;
     this.refName = ref;
     this.relevant = relevant;
-    this.effective = new HashMap<String, List<PermissionRule>>();
+    this.effective = new HashMap<>();
   }
 
   public String getRefName() {
@@ -120,6 +120,7 @@ public class RefControl {
    */
   public boolean isVisibleByRegisteredUsers() {
     List<PermissionRule> access = relevant.getPermission(Permission.READ);
+    List<PermissionRule> overridden = relevant.getOverridden(Permission.READ);
     Set<ProjectRef> allows = Sets.newHashSet();
     Set<ProjectRef> blocks = Sets.newHashSet();
     for (PermissionRule rule : access) {
@@ -127,6 +128,11 @@ public class RefControl {
         blocks.add(relevant.getRuleProps(rule));
       } else if (SystemGroupBackend.isAnonymousOrRegistered(rule.getGroup())) {
         allows.add(relevant.getRuleProps(rule));
+      }
+    }
+    for (PermissionRule rule : overridden) {
+      if (SystemGroupBackend.isAnonymousOrRegistered(rule.getGroup())) {
+        blocks.remove(relevant.getRuleProps(rule));
       }
     }
     blocks.removeAll(allows);
@@ -207,12 +213,12 @@ public class RefControl {
 
   public boolean canWrite() {
     return getProjectControl().getProject().getState().equals(
-        Project.State.ACTIVE);
+        ProjectState.ACTIVE);
   }
 
   public boolean canRead() {
     return getProjectControl().getProject().getState().equals(
-        Project.State.READ_ONLY) || canWrite();
+        ProjectState.READ_ONLY) || canWrite();
   }
 
   private boolean canPushWithForce() {
@@ -387,7 +393,7 @@ public class RefControl {
 
   /** All value ranges of any allowed label permission. */
   public List<PermissionRange> getLabelRanges(boolean isChangeOwner) {
-    List<PermissionRange> r = new ArrayList<PermissionRange>();
+    List<PermissionRange> r = new ArrayList<>();
     for (Map.Entry<String, List<PermissionRule>> e : relevant.getDeclaredPermissions()) {
       if (Permission.isLabel(e.getKey())) {
         int min = 0;
@@ -492,6 +498,7 @@ public class RefControl {
 
   private boolean doCanPerform(String permissionName, boolean blockOnly) {
     List<PermissionRule> access = access(permissionName);
+    List<PermissionRule> overridden = relevant.getOverridden(permissionName);
     Set<ProjectRef> allows = Sets.newHashSet();
     Set<ProjectRef> blocks = Sets.newHashSet();
     for (PermissionRule rule : access) {
@@ -501,6 +508,9 @@ public class RefControl {
         allows.add(relevant.getRuleProps(rule));
       }
     }
+    for (PermissionRule rule : overridden) {
+      blocks.remove(relevant.getRuleProps(rule));
+    }
     blocks.removeAll(allows);
     return blocks.isEmpty() && (!allows.isEmpty() || blockOnly);
   }
@@ -508,6 +518,7 @@ public class RefControl {
   /** True if the user has force this permission. Works only for non labels. */
   private boolean canForcePerform(String permissionName) {
     List<PermissionRule> access = access(permissionName);
+    List<PermissionRule> overridden = relevant.getOverridden(permissionName);
     Set<ProjectRef> allows = Sets.newHashSet();
     Set<ProjectRef> blocks = Sets.newHashSet();
     for (PermissionRule rule : access) {
@@ -517,6 +528,11 @@ public class RefControl {
         allows.add(relevant.getRuleProps(rule));
       }
     }
+    for (PermissionRule rule : overridden) {
+      if (rule.getForce()) {
+        blocks.remove(relevant.getRuleProps(rule));
+      }
+    }
     blocks.removeAll(allows);
     return blocks.isEmpty() && !allows.isEmpty();
   }
@@ -524,6 +540,7 @@ public class RefControl {
   /** True if for this permission force is blocked for the user. Works only for non labels. */
   private boolean isForceBlocked(String permissionName) {
     List<PermissionRule> access = access(permissionName);
+    List<PermissionRule> overridden = relevant.getOverridden(permissionName);
     Set<ProjectRef> allows = Sets.newHashSet();
     Set<ProjectRef> blocks = Sets.newHashSet();
     for (PermissionRule rule : access) {
@@ -531,6 +548,11 @@ public class RefControl {
         blocks.add(relevant.getRuleProps(rule));
       } else if (rule.getForce()) {
         allows.add(relevant.getRuleProps(rule));
+      }
+    }
+    for (PermissionRule rule : overridden) {
+      if (rule.getForce()) {
+        blocks.remove(relevant.getRuleProps(rule));
       }
     }
     blocks.removeAll(allows);
@@ -565,7 +587,7 @@ public class RefControl {
       return rules;
     }
 
-    List<PermissionRule> mine = new ArrayList<PermissionRule>(rules.size());
+    List<PermissionRule> mine = new ArrayList<>(rules.size());
     for (PermissionRule rule : rules) {
       if (projectControl.match(rule, isChangeOwner)) {
         mine.add(rule);

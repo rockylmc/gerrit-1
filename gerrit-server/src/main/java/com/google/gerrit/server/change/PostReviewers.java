@@ -36,6 +36,7 @@ import com.google.gerrit.reviewdb.client.PatchSetApproval;
 import com.google.gerrit.reviewdb.server.ReviewDb;
 import com.google.gerrit.server.ApprovalsUtil;
 import com.google.gerrit.server.ChangeUtil;
+import com.google.gerrit.server.CurrentUser;
 import com.google.gerrit.server.IdentifiedUser;
 import com.google.gerrit.server.account.AccountCache;
 import com.google.gerrit.server.account.AccountInfo;
@@ -54,6 +55,7 @@ import com.google.gerrit.server.project.NoSuchProjectException;
 import com.google.gwtorm.server.OrmException;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.Singleton;
 
 import org.eclipse.jgit.lib.Config;
 import org.slf4j.Logger;
@@ -65,6 +67,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+@Singleton
 public class PostReviewers implements RestModifyView<ChangeResource, AddReviewerInput> {
   private static final Logger log = LoggerFactory
       .getLogger(PostReviewers.class);
@@ -76,12 +79,12 @@ public class PostReviewers implements RestModifyView<ChangeResource, AddReviewer
   private final ReviewerResource.Factory reviewerFactory;
   private final ApprovalsUtil approvalsUtil;
   private final AddReviewerSender.Factory addReviewerSenderFactory;
-  private final Provider<GroupsCollection> groupsCollection;
+  private final GroupsCollection groupsCollection;
   private final GroupMembers.Factory groupMembersFactory;
   private final AccountInfo.Loader.Factory accountLoaderFactory;
   private final Provider<ReviewDb> dbProvider;
   private final ChangeUpdate.Factory updateFactory;
-  private final IdentifiedUser currentUser;
+  private final Provider<CurrentUser> currentUser;
   private final IdentifiedUser.GenericFactory identifiedUserFactory;
   private final Config cfg;
   private final ChangeHooks hooks;
@@ -94,12 +97,12 @@ public class PostReviewers implements RestModifyView<ChangeResource, AddReviewer
       ReviewerResource.Factory reviewerFactory,
       ApprovalsUtil approvalsUtil,
       AddReviewerSender.Factory addReviewerSenderFactory,
-      Provider<GroupsCollection> groupsCollection,
+      GroupsCollection groupsCollection,
       GroupMembers.Factory groupMembersFactory,
       AccountInfo.Loader.Factory accountLoaderFactory,
       Provider<ReviewDb> db,
       ChangeUpdate.Factory updateFactory,
-      IdentifiedUser currentUser,
+      Provider<CurrentUser> currentUser,
       IdentifiedUser.GenericFactory identifiedUserFactory,
       @GerritServerConfig Config cfg,
       ChangeHooks hooks,
@@ -148,18 +151,19 @@ public class PostReviewers implements RestModifyView<ChangeResource, AddReviewer
 
   private PostResult putAccount(ReviewerResource rsrc) throws OrmException,
       EmailException, IOException {
-    Account.Id id = rsrc.getUser().getAccountId();
-    ChangeControl control = rsrc.getControl().forUser(
-        identifiedUserFactory.create(id));
+    Account member = rsrc.getUser().getAccount();
+    ChangeControl control = rsrc.getControl();
     PostResult result = new PostResult();
-    addReviewers(rsrc, result, ImmutableMap.of(id, control));
+    if (isValidReviewer(member, control)) {
+      addReviewers(rsrc, result, ImmutableMap.of(member.getId(), control));
+    }
     return result;
   }
 
   private PostResult putGroup(ChangeResource rsrc, AddReviewerInput input)
       throws BadRequestException,
       UnprocessableEntityException, OrmException, EmailException, IOException {
-    GroupDescription.Basic group = groupsCollection.get().parseInternal(input.reviewer);
+    GroupDescription.Basic group = groupsCollection.parseInternal(input.reviewer);
     PostResult result = new PostResult();
     if (!isLegalReviewerGroup(group.getGroupUUID())) {
       result.error = MessageFormat.format(
@@ -203,18 +207,23 @@ public class PostReviewers implements RestModifyView<ChangeResource, AddReviewer
     }
 
     for (Account member : members) {
-      if (member.isActive()) {
-        IdentifiedUser user = identifiedUserFactory.create(member.getId());
-        // Does not account for draft status as a user might want to let a
-        // reviewer see a draft.
-        if (control.forUser(user).isRefVisible()) {
-          reviewers.put(user.getAccountId(), control);
-        }
+      if (isValidReviewer(member, control)) {
+        reviewers.put(member.getId(), control);
       }
     }
 
     addReviewers(rsrc, result, reviewers);
     return result;
+  }
+
+  private boolean isValidReviewer(Account member, ChangeControl control) {
+    if (member.isActive()) {
+      IdentifiedUser user = identifiedUserFactory.create(member.getId());
+      // Does not account for draft status as a user might want to let a
+      // reviewer see a draft.
+      return control.forUser(user).isRefVisible();
+    }
+    return false;
   }
 
   private void addReviewers(ChangeResource rsrc, PostResult result,
@@ -239,6 +248,7 @@ public class PostReviewers implements RestModifyView<ChangeResource, AddReviewer
         indexer.indexAsync(rsrc.getChange().getId());
     result.reviewers = Lists.newArrayListWithCapacity(added.size());
     for (PatchSetApproval psa : added) {
+      // New reviewers have value 0, don't bother normalizing.
       result.reviewers.add(json.format(
           new ReviewerInfo(psa.getAccountId()),
           reviewers.get(psa.getAccountId()),
@@ -266,15 +276,16 @@ public class PostReviewers implements RestModifyView<ChangeResource, AddReviewer
     //
     // The user knows they added themselves, don't bother emailing them.
     List<Account.Id> toMail = Lists.newArrayListWithCapacity(added.size());
+    IdentifiedUser identifiedUser = (IdentifiedUser) currentUser.get();
     for (PatchSetApproval psa : added) {
-      if (!psa.getAccountId().equals(currentUser.getAccountId())) {
+      if (!psa.getAccountId().equals(identifiedUser.getAccountId())) {
         toMail.add(psa.getAccountId());
       }
     }
     if (!toMail.isEmpty()) {
       try {
         AddReviewerSender cm = addReviewerSenderFactory.create(change);
-        cm.setFrom(currentUser.getAccountId());
+        cm.setFrom(identifiedUser.getAccountId());
         cm.addReviewers(toMail);
         cm.send();
       } catch (Exception err) {

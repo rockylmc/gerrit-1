@@ -14,8 +14,6 @@
 
 package com.google.gerrit.server.notedb;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.gerrit.server.config.GerritServerConfig;
 import com.google.inject.Inject;
@@ -36,20 +34,26 @@ public class NotesMigration {
   static NotesMigration allEnabled() {
     Config cfg = new Config();
     cfg.setBoolean("notedb", null, "write", true);
-    //cfg.setBoolean("notedb", "patchSetApprovals", "read", true);
+    cfg.setBoolean("notedb", "patchSetApprovals", "read", true);
+    cfg.setBoolean("notedb", "changeMessages", "read", true);
+    cfg.setBoolean("notedb", "publishedComments", "read", true);
     return new NotesMigration(cfg);
   }
 
   private final boolean write;
   private final boolean readPatchSetApprovals;
+  private final boolean readChangeMessages;
+  private final boolean readPublishedComments;
 
   @Inject
   NotesMigration(@GerritServerConfig Config cfg) {
     write = cfg.getBoolean("notedb", null, "write", false);
     readPatchSetApprovals =
         cfg.getBoolean("notedb", "patchSetApprovals", "read", false);
-    checkArgument(!readPatchSetApprovals,
-        "notedb.readPatchSetApprovals not yet supported");
+    readChangeMessages =
+        cfg.getBoolean("notedb", "changeMessages", "read", false);
+    readPublishedComments =
+        cfg.getBoolean("notedb", "publishedComments", "read", false);
   }
 
   public boolean write() {
@@ -58,5 +62,13 @@ public class NotesMigration {
 
   public boolean readPatchSetApprovals() {
     return readPatchSetApprovals;
+  }
+
+  public boolean readChangeMessages() {
+    return readChangeMessages;
+  }
+
+  public boolean readPublishedComments() {
+    return readPublishedComments;
   }
 }

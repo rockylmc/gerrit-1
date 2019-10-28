@@ -72,6 +72,10 @@ limitations under the License.
         <g:Button ui:field='add' styleName='{res.style.button}'>
           <div>Add</div>
         </g:Button>
+        <g:Button ui:field='addMe'
+            styleName='{res.style.button}' visible='false'>
+          <div>Add Me</div>
+        </g:Button>
         <g:Button ui:field='cancel'
             styleName='{res.style.button}'
             addStyleNames='{style.cancel}'>
